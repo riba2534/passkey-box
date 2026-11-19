@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "../src/lib/config";
 import { decideGet, filterByAllowList, hasExcludedCredential, selectAlgorithm } from "../src/lib/decision";
-import { effectiveRpId, hostMatchesRpId } from "../src/lib/rpid";
+import { effectiveRpId, hostMatchesRpId, isIpAddress } from "../src/lib/rpid";
 
 const on: Settings = { autoLoginSingle: true, conditionalAutoLogin: true };
 const off: Settings = { autoLoginSingle: false, conditionalAutoLogin: false };
@@ -92,5 +92,28 @@ describe("rpId", () => {
     expect(hostMatchesRpId("example.org", "example.com")).toBe(false);
     expect(hostMatchesRpId("example.com", "")).toBe(false);
     expect(hostMatchesRpId("", "example.com")).toBe(false);
+  });
+
+  it("rpIds without a dot only match the identical host", () => {
+    expect(hostMatchesRpId("localhost", "localhost")).toBe(true);
+    expect(hostMatchesRpId("LocalHost", "localhost")).toBe(true);
+    expect(hostMatchesRpId("a.com", "com")).toBe(false);
+    expect(hostMatchesRpId("app.localhost", "localhost")).toBe(false);
+    expect(hostMatchesRpId("intranet", "intranet")).toBe(true);
+    expect(hostMatchesRpId("a.b.example", "example")).toBe(false);
+  });
+
+  it("IP address hosts only match exactly", () => {
+    expect(hostMatchesRpId("127.0.0.1", "127.0.0.1")).toBe(true);
+    expect(hostMatchesRpId("127.0.0.1", "0.0.1")).toBe(false);
+    expect(hostMatchesRpId("192.168.1.10", "168.1.10")).toBe(false);
+    expect(hostMatchesRpId("[::1]", "[::1]")).toBe(true);
+    expect(hostMatchesRpId("[2001:db8::1]", "db8::1]")).toBe(false);
+    expect(hostMatchesRpId("2001:db8::1.2.3", "2.3")).toBe(false);
+    expect(isIpAddress("10.0.0.1")).toBe(true);
+    expect(isIpAddress("[::1]")).toBe(true);
+    expect(isIpAddress("::1")).toBe(true);
+    expect(isIpAddress("example.com")).toBe(false);
+    expect(isIpAddress("1.2.3.example")).toBe(false);
   });
 });

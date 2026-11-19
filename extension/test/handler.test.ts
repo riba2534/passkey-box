@@ -84,6 +84,24 @@ describe("handleRequest: unconfigured", () => {
   });
 });
 
+describe("handleRequest: callers the extension does not handle", () => {
+  it.each([
+    ["sandboxed frame (opaque origin, location.hostname still set)", { origin: "null", hostname: "login.example.com", crossOrigin: false }],
+    ["opaque origin with empty hostname", { origin: "null", hostname: "", crossOrigin: false }],
+    ["non-http(s) origin", { origin: "chrome-extension://abcdef", hostname: "abcdef", crossOrigin: false }],
+  ])("%s → fallback without UI or server calls", async (_name, c: CallerInfo) => {
+    const store = new MemoryStore();
+    await register(store, "opaque");
+    store.listCalls = [];
+    const get: BackgroundRequest = { type: "pkb:get", caller: c, options: getOptions({ rpId: undefined }) };
+    expect(await handleRequest(get, deps(store))).toEqual({ action: "fallback" });
+    expect(await handleRequest({ ...get, options: getOptions() }, deps(store))).toEqual({ action: "fallback" });
+    expect(await handleRequest(createReq(createOptions(), c), deps(store))).toEqual({ action: "fallback" });
+    expect(store.listCalls).toEqual([]);
+    expect(store.credentials).toHaveLength(1);
+  });
+});
+
 describe("handleRequest: create", () => {
   it("generates an ES256 key, uploads it and returns a verifiable response", async () => {
     const store = new MemoryStore();
@@ -272,6 +290,38 @@ describe("handleRequest: get", () => {
       action: "error",
       message: expect.stringContaining("无法连接服务器"),
     });
+  });
+
+  it("conditional requests stay silent (pending) when the server is unreachable", async () => {
+    const store = new MemoryStore();
+    store.failList = true;
+    expect(await handleRequest(getReq(getOptions(), { mediation: "conditional" }), deps(store))).toEqual({ action: "pending" });
+    expect(store.listCalls).toEqual(["example.com"]);
+    // modal requests still explain the failure
+    expect((await handleRequest(getReq(getOptions(), { mediation: "optional" }), deps(store))).action).toBe("error");
+    // after the user picked an account from a conditional picker, failures are reported
+    expect(
+      (await handleRequest(getReq(getOptions(), { mediation: "conditional", credentialId: "picked" }), deps(store))).action,
+    ).toBe("error");
+  });
+
+  it("dotless rpIds and IP hosts only match exactly", async () => {
+    const store = new MemoryStore();
+    const on = (hostname: string): CallerInfo => ({ origin: `https://${hostname}`, hostname, crossOrigin: false });
+    const get = (hostname: string, rpId: string): BackgroundRequest => ({
+      type: "pkb:get",
+      caller: on(hostname),
+      options: getOptions({ rpId }),
+    });
+    expect(await handleRequest(get("a.com", "com"), deps(store))).toMatchObject({ action: "reject", name: "SecurityError" });
+    expect(await handleRequest(get("127.0.0.1", "0.0.1"), deps(store))).toMatchObject({ action: "reject", name: "SecurityError" });
+    expect(await handleRequest(createReq(createOptions({ rp: { id: "com", name: "" } }), on("a.com")), deps(store))).toMatchObject({
+      action: "reject",
+      name: "SecurityError",
+    });
+    expect(store.listCalls).toEqual([]);
+    expect((await handleRequest(get("localhost", "localhost"), deps(store))).action).toBe("empty");
+    expect((await handleRequest(get("127.0.0.1", "127.0.0.1"), deps(store))).action).toBe("empty");
   });
 
   it("use() failures do not affect the login", async () => {
