@@ -15,54 +15,33 @@ import {
   STACK_TMP,
 } from '../../support/config.ts';
 import { type Account, PkbApi } from '../../support/pkb-api.ts';
-import {
-  isPortOpen,
-  type ProcessInfo,
-  readJsonFile,
-  runStep,
-  startDetached,
-  stopProcess,
-  waitForHealthy,
-  writeJsonFile,
-} from '../../support/process.ts';
+import { resetService, runStep, startService, stopProcess, writeJsonFile } from '../../support/process.ts';
 import type { StackState } from '../../support/stack.ts';
 
 const randomPassword = () => randomBytes(18).toString('base64url');
 
 setup('build and start the Passkey Box server and extension', async () => {
   setup.setTimeout(10 * 60_000);
+  await resetService(STACK_STATE_FILE, STACK_TMP);
 
-  for (const [what, file] of [
-    ['server', path.join(SERVER_DIR, 'cmd', 'passkey-box')],
-    ['extension', path.join(EXTENSION_DIR, 'package.json')],
-  ] as const) {
-    if (!fs.existsSync(file)) throw new Error(`${what} sources not found (${file}); merge them before running this project`);
-  }
-
-  const stale = readJsonFile<ProcessInfo>(STACK_STATE_FILE);
-  if (stale) await stopProcess(stale);
-  fs.rmSync(STACK_TMP, { recursive: true, force: true });
-  fs.mkdirSync(STACK_TMP, { recursive: true });
-
-  // CONTRACT §3 and §4.1.
+  // CONTRACT §3 and §4.1. The two builds are independent, so they run side by side.
   const serverBin = path.join(STACK_TMP, 'bin', 'passkey-box');
-  runStep('go', ['build', '-o', serverBin, './cmd/passkey-box'], {
-    cwd: SERVER_DIR,
-    env: { ...process.env, CGO_ENABLED: '0' },
-  });
-  runStep('npm', ['--prefix', EXTENSION_DIR, 'ci'], { cwd: EXTENSION_DIR });
-  runStep('npm', ['--prefix', EXTENSION_DIR, 'run', 'build'], { cwd: EXTENSION_DIR });
+  await Promise.all([
+    runStep('go', ['build', '-o', serverBin, './cmd/passkey-box'], {
+      cwd: SERVER_DIR,
+      env: { ...process.env, CGO_ENABLED: '0' },
+    }),
+    runStep('npm', ['--prefix', EXTENSION_DIR, 'ci'], { cwd: EXTENSION_DIR }).then(() =>
+      runStep('npm', ['--prefix', EXTENSION_DIR, 'run', 'build'], { cwd: EXTENSION_DIR }),
+    ),
+  ]);
   for (const file of ['manifest.json', 'background.js', 'inject.js', 'content.js']) {
     if (!fs.existsSync(path.join(EXTENSION_DIST, file))) throw new Error(`extension build did not produce dist/${file}`);
   }
 
-  if (await isPortOpen(SERVER_PORT)) {
-    throw new Error(`port ${SERVER_PORT} is already in use; stop that process or set PKB_E2E_SERVER_PORT`);
-  }
-
   const admin: Account = { username: 'e2e-admin', password: randomPassword() };
-  const logFile = path.join(STACK_TMP, 'server.log');
-  const pid = startDetached(serverBin, [], {
+  const info = await startService({
+    command: serverBin,
     cwd: STACK_TMP,
     env: {
       ...process.env,
@@ -73,13 +52,15 @@ setup('build and start the Passkey Box server and extension', async () => {
       PKB_ALLOW_REGISTER: 'false',
       PKB_EXTENSION_ZIP: '',
     },
-    logFile,
+    port: SERVER_PORT,
+    portVariable: 'PKB_E2E_SERVER_PORT',
+    logFile: path.join(STACK_TMP, 'server.log'),
+    marker: serverBin,
+    stateFile: STACK_STATE_FILE,
+    healthUrl: `${SERVER_URL}/healthz`,
   });
-  const info: ProcessInfo = { pid, logFile, marker: serverBin };
-  writeJsonFile(STACK_STATE_FILE, info);
 
   try {
-    await waitForHealthy(`${SERVER_URL}/healthz`, info);
     const api = new PkbApi(SERVER_URL);
     if (!(await api.me(admin)).is_admin) throw new Error('bootstrap admin is not an admin');
 
@@ -88,13 +69,8 @@ setup('build and start the Passkey Box server and extension', async () => {
       const user = await api.createUser(admin, { username, password });
       return { id: user.id, username: user.username, password };
     };
-    const state: StackState = {
-      ...info,
-      serverUrl: SERVER_URL,
-      extensionDist: EXTENSION_DIST,
-      admin,
-      users: { a: await create('e2e-user-a'), b: await create('e2e-user-b') },
-    };
+    const [a, b] = await Promise.all([create('e2e-user-a'), create('e2e-user-b')]);
+    const state: StackState = { ...info, serverUrl: SERVER_URL, extensionDist: EXTENSION_DIST, users: { a, b } };
     writeJsonFile(STACK_STATE_FILE, state);
   } catch (err) {
     await stopProcess(info);

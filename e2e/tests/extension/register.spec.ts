@@ -8,8 +8,7 @@ test.beforeEach(async ({ extension, stack, rp }) => {
 });
 
 test('registration saves the passkey to the server without asking', async ({ rp, ui, pkb, stack }) => {
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
   await expect(ui.toast('saved')).toBeVisible();
   await ui.expectNoDialog();
 
@@ -28,10 +27,8 @@ test('registration saves the passkey to the server without asking', async ({ rp,
 });
 
 test('registering the same account on the same site again overwrites the old passkey', async ({ rp, pkb, stack }) => {
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
+  await rp.registerOk('alice');
 
   // The RP keeps both credentials, the server only the newest one (same rp_id + user_handle).
   const alice = await rpApi.user('alice');
@@ -49,8 +46,7 @@ test('registering with excludeCredentials that match a saved passkey fails with 
   pkb,
   stack,
 }) => {
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
   const before = await pkb.listCredentials(stack.users.a);
 
   await rp.register('alice', { exclude: true });

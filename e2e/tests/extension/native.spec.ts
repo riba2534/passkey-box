@@ -3,15 +3,20 @@
 
 import { expect, test } from '../../support/extension-fixtures.ts';
 import { rpApi } from '../../support/rp.ts';
-import { base64ToBase64url, VirtualAuthenticator } from '../../support/virtual-authenticator.ts';
+import { base64ToBase64url } from '../../support/virtual-authenticator.ts';
 
-test('a configured extension never calls the native implementation', async ({ extension, stack, page, rp, ui, pkb }) => {
-  const authenticator = await VirtualAuthenticator.attach(page);
+test('a configured extension never calls the native implementation', async ({
+  extension,
+  stack,
+  authenticator,
+  rp,
+  ui,
+  pkb,
+}) => {
   await extension.configure(stack.users.a);
   await rp.goto();
 
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
   await rp.login();
   await rp.expectResult('authenticated:alice');
   await rp.loginWithUsername('alice');
@@ -28,17 +33,15 @@ test('a configured extension never calls the native implementation', async ({ ex
 test('an unconfigured extension leaves registration to the native implementation', async ({
   extension,
   stack,
-  page,
+  authenticator,
   rp,
   ui,
   pkb,
 }) => {
   await extension.unconfigure();
-  const authenticator = await VirtualAuthenticator.attach(page);
   await rp.goto();
 
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
   await ui.expectNoDialog();
 
   const alice = await rpApi.user('alice');
@@ -51,6 +54,7 @@ test('an unconfigured extension leaves registration to the native implementation
 test('"使用其他方式" in the empty dialog hands the login to the native implementation', async ({
   extension,
   stack,
+  authenticator,
   page,
   rp,
   ui,
@@ -58,10 +62,8 @@ test('"使用其他方式" in the empty dialog hands the login to the native imp
 }) => {
   // A passkey that only the native authenticator holds.
   await extension.unconfigure();
-  const authenticator = await VirtualAuthenticator.attach(page);
   await rp.goto();
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
   expect(authenticator.operations).toEqual(['credentialAdded']);
 
   await extension.configure(stack.users.a);

@@ -1,12 +1,11 @@
 import { STACK_STATE_FILE } from './config.ts';
-import type { Account, TestUser } from './pkb-api.ts';
+import type { TestUser } from './pkb-api.ts';
 import { type ProcessInfo, readJsonFile } from './process.ts';
 
 /** Written by tests/setup/stack.setup.ts into /tmp/pkb-e2e/stack/state.json. */
 export type StackState = ProcessInfo & {
   serverUrl: string;
   extensionDist: string;
-  admin: Account;
   /** Two ordinary Passkey Box accounts; tests clear their credentials before each test. */
   users: { a: TestUser; b: TestUser };
 };

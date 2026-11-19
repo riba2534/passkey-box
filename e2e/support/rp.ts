@@ -52,6 +52,14 @@ export class RpPage {
     await this.page.locator('#register').click();
   }
 
+  /** Registers each username in turn and waits for its `registered:<name>` result. */
+  async registerOk(...usernames: string[]): Promise<void> {
+    for (const username of usernames) {
+      await this.register(username);
+      await this.expectResult(`registered:${username}`);
+    }
+  }
+
   /** Usernameless login: allowCredentials is empty. */
   async login(): Promise<void> {
     await this.page.locator('#login').click();

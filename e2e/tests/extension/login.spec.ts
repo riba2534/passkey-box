@@ -1,12 +1,4 @@
 import { expect, test } from '../../support/extension-fixtures.ts';
-import type { RpPage } from '../../support/rp.ts';
-
-async function registerAccounts(rp: RpPage, ...usernames: string[]): Promise<void> {
-  for (const username of usernames) {
-    await rp.register(username);
-    await rp.expectResult(`registered:${username}`);
-  }
-}
 
 test.beforeEach(async ({ extension, stack, rp }) => {
   await extension.configure(stack.users.a);
@@ -14,7 +6,7 @@ test.beforeEach(async ({ extension, stack, rp }) => {
 });
 
 test('one passkey: usernameless login signs in directly without any dialog', async ({ rp, ui, pkb, stack }) => {
-  await registerAccounts(rp, 'alice');
+  await rp.registerOk('alice');
 
   await rp.login();
   await rp.expectResult('authenticated:alice');
@@ -31,7 +23,7 @@ test('two passkeys: usernameless login shows the picker and signs in with the ch
   pkb,
   stack,
 }) => {
-  await registerAccounts(rp, 'alice', 'bob');
+  await rp.registerOk('alice', 'bob');
 
   await rp.login();
   await expect(ui.dialog('picker')).toBeVisible();
@@ -50,7 +42,7 @@ test('two passkeys: usernameless login shows the picker and signs in with the ch
 });
 
 test('username first: allowCredentials selects the matching passkey without a dialog', async ({ rp, ui }) => {
-  await registerAccounts(rp, 'alice', 'bob');
+  await rp.registerOk('alice', 'bob');
 
   await rp.loginWithUsername('bob');
   await rp.expectResult('authenticated:bob');
@@ -62,7 +54,7 @@ test('username first: allowCredentials selects the matching passkey without a di
 });
 
 test('conditional mediation: a single candidate signs in as soon as the page opens', async ({ rp, ui }) => {
-  await registerAccounts(rp, 'alice');
+  await rp.registerOk('alice');
 
   await rp.goto({ conditional: true });
   await rp.expectResult('authenticated:alice');

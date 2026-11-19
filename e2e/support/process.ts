@@ -1,7 +1,8 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { KEEP_TMP } from './config.ts';
 
 export type ProcessInfo = { pid: number; logFile: string; marker: string };
 
@@ -9,7 +10,7 @@ export type ProcessInfo = { pid: number; logFile: string; marker: string };
  * Starts a long-running process that outlives the Playwright worker which spawned it
  * (setup and teardown may run in different workers). Output goes to `logFile`.
  */
-export function startDetached(
+function startDetached(
   command: string,
   args: string[],
   options: { cwd: string; env: NodeJS.ProcessEnv; logFile: string },
@@ -30,7 +31,7 @@ export function startDetached(
   }
 }
 
-export function isAlive(pid: number): boolean {
+function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -66,7 +67,7 @@ export async function stopProcess(info: ProcessInfo, timeoutMs = 5_000): Promise
   }
 }
 
-export function logTail(logFile: string, lines = 40): string {
+function logTail(logFile: string, lines = 40): string {
   try {
     return fs.readFileSync(logFile, 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
   } catch {
@@ -74,7 +75,7 @@ export function logTail(logFile: string, lines = 40): string {
   }
 }
 
-export async function waitForHealthy(url: string, info: ProcessInfo, timeoutMs = 20_000): Promise<void> {
+async function waitForHealthy(url: string, info: ProcessInfo, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!isAlive(info.pid)) {
@@ -91,7 +92,7 @@ export async function waitForHealthy(url: string, info: ProcessInfo, timeoutMs =
   throw new Error(`timed out waiting for ${url}:\n${logTail(info.logFile)}`);
 }
 
-export function isPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
+function isPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ port, host });
     socket.once('connect', () => {
@@ -102,18 +103,21 @@ export function isPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
   });
 }
 
-/** Runs a build step synchronously; throws with the tail of its output on failure. */
-export function runStep(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): void {
-  const result = spawnSync(command, args, {
-    cwd: options.cwd,
-    env: options.env ?? process.env,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+/** Runs a build step; rejects with the tail of its output on failure. */
+export function runStep(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<void> {
+  const what = `\`${command} ${args.join(' ')}\``;
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (output += chunk));
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (output += chunk));
+    child.once('error', (err) => reject(new Error(`${what} failed to start: ${err.message}`)));
+    child.once('close', (status) => {
+      if (status === 0) return resolve();
+      const tail = output.trimEnd().split('\n').slice(-60).join('\n');
+      reject(new Error(`${what} failed (status ${status}):\n${tail}`));
+    });
   });
-  if (result.status !== 0) {
-    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd().split('\n').slice(-60).join('\n');
-    throw new Error(`\`${command} ${args.join(' ')}\` failed (status ${result.status}, ${result.error ?? 'no error'}):\n${output}`);
-  }
 }
 
 export function readJsonFile<T>(file: string): T | null {
@@ -126,4 +130,51 @@ export function readJsonFile<T>(file: string): T | null {
 
 export function writeJsonFile(file: string, value: unknown): void {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Stops an instance recorded in `stateFile` by an earlier run and empties `tmpDir`. */
+export async function resetService(stateFile: string, tmpDir: string): Promise<void> {
+  const stale = readJsonFile<ProcessInfo>(stateFile);
+  if (stale) await stopProcess(stale);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
+}
+
+/**
+ * Starts a detached service for a setup project, records it in `stateFile` for the teardown
+ * project and waits until `healthUrl` answers. A service that never gets healthy is stopped.
+ */
+export async function startService(options: {
+  command: string;
+  args?: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  /** Port the service listens on, and the variable that overrides it. */
+  port: number;
+  portVariable: string;
+  logFile: string;
+  marker: string;
+  stateFile: string;
+  healthUrl: string;
+}): Promise<ProcessInfo> {
+  if (await isPortOpen(options.port)) {
+    throw new Error(`port ${options.port} is already in use; stop that process or set ${options.portVariable}`);
+  }
+  const pid = startDetached(options.command, options.args ?? [], options);
+  const info: ProcessInfo = { pid, logFile: options.logFile, marker: options.marker };
+  writeJsonFile(options.stateFile, info);
+  try {
+    await waitForHealthy(options.healthUrl, info);
+  } catch (err) {
+    await stopProcess(info);
+    throw err;
+  }
+  return info;
+}
+
+/** Teardown counterpart of resetService/startService. */
+export async function stopService(stateFile: string, tmpDir: string): Promise<void> {
+  const info = readJsonFile<ProcessInfo>(stateFile);
+  if (info) await stopProcess(info);
+  if (!KEEP_TMP) fs.rmSync(tmpDir, { recursive: true, force: true });
 }

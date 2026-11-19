@@ -71,8 +71,7 @@ export class PkbApi {
   }
 
   async clearCredentials(account: Account): Promise<void> {
-    for (const credential of await this.listCredentials(account)) {
-      await this.deleteCredential(account, credential.id);
-    }
+    const credentials = await this.listCredentials(account);
+    await Promise.all(credentials.map((c) => this.deleteCredential(account, c.id)));
   }
 }

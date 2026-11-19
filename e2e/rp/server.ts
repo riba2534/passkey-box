@@ -42,7 +42,6 @@ type Flow =
   | { kind: 'login'; challenge: string; user: User | null };
 
 const usersByName = new Map<string, User>();
-const usersByHandle = new Map<string, User>();
 const flows = new Map<string, Flow>();
 
 class RpError extends Error {
@@ -55,7 +54,6 @@ class RpError extends Error {
 
 function reset(): void {
   usersByName.clear();
-  usersByHandle.clear();
   flows.clear();
 }
 
@@ -70,7 +68,6 @@ function getOrCreateUser(name: string): User {
   if (!user) {
     user = { name, handle: randomBytes(16).toString('base64url'), credentials: [] };
     usersByName.set(key, user);
-    usersByHandle.set(user.handle, user);
   }
   return user;
 }
@@ -179,13 +176,11 @@ async function loginVerify(body: { flowId?: unknown; response?: unknown }) {
   if (!verification.verified) throw new RpError(400, 'assertion-not-verified');
   found.credential.counter = verification.authenticationInfo.newCounter;
 
-  // The username shown to the page comes from userHandle, like a real usernameless login.
+  // Like a real usernameless login, the returned userHandle must name the credential's owner.
   const userHandle = response.response.userHandle;
   if (!userHandle) throw new RpError(400, 'missing-user-handle');
-  const user = usersByHandle.get(userHandle);
-  if (!user) throw new RpError(400, 'unknown-user-handle');
-  if (user !== found.user) throw new RpError(400, 'user-handle-mismatch');
-  return { username: user.name, credentialId: found.credential.id };
+  if (userHandle !== found.user.handle) throw new RpError(400, 'user-handle-mismatch');
+  return { username: found.user.name, credentialId: found.credential.id };
 }
 
 function snapshot() {

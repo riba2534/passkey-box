@@ -1,22 +1,26 @@
 // Smoke test for the test RP itself: no extension, no Passkey Box server. Chrome's native
 // WebAuthn implementation is backed by a CDP virtual authenticator.
 
-import { expect, test } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import { RP_ID } from '../support/config.ts';
 import { RpPage, rpApi } from '../support/rp.ts';
 import { base64ToBase64url, VirtualAuthenticator } from '../support/virtual-authenticator.ts';
 
-test.beforeEach(async () => {
-  await rpApi.reset();
+const test = base.extend<{ authenticator: VirtualAuthenticator; rp: RpPage }>({
+  authenticator: async ({ page }, use) => {
+    await use(await VirtualAuthenticator.attach(page));
+  },
+  // Every test gets a reset RP, opened with the virtual authenticator already attached.
+  rp: async ({ page, authenticator: _ }, use) => {
+    await rpApi.reset();
+    const rp = new RpPage(page);
+    await rp.goto();
+    await use(rp);
+  },
 });
 
-test('registers, then logs in usernameless and username-first', async ({ page }) => {
-  const authenticator = await VirtualAuthenticator.attach(page);
-  const rp = new RpPage(page);
-  await rp.goto();
-
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+test('registers, then logs in usernameless and username-first', async ({ page, authenticator, rp }) => {
+  await rp.registerOk('alice');
 
   const alice = await rpApi.user('alice');
   expect(alice.credentials).toHaveLength(1);
@@ -30,8 +34,7 @@ test('registers, then logs in usernameless and username-first', async ({ page })
   await rp.login();
   await rp.expectResult('authenticated:alice');
 
-  await rp.register('bob');
-  await rp.expectResult('registered:bob');
+  await rp.registerOk('bob');
   await rp.loginWithUsername('bob');
   await rp.expectResult('authenticated:bob');
   await rp.loginWithUsername('alice');
@@ -44,41 +47,25 @@ test('registers, then logs in usernameless and username-first', async ({ page })
     .toEqual(['credentialAdded', 'credentialAsserted', 'credentialAdded', 'credentialAsserted', 'credentialAsserted']);
 });
 
-test('excludeCredentials makes a duplicate registration fail with InvalidStateError', async ({ page }) => {
-  await VirtualAuthenticator.attach(page);
-  const rp = new RpPage(page);
-  await rp.goto();
-
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+test('excludeCredentials makes a duplicate registration fail with InvalidStateError', async ({ rp }) => {
+  await rp.registerOk('alice');
   await rp.register('alice', { exclude: true });
   await rp.expectResult('error:InvalidStateError');
   expect((await rpApi.user('alice')).credentials).toHaveLength(1);
 });
 
-test('re-registering without excludeCredentials keeps both credentials on the RP', async ({ page }) => {
-  await VirtualAuthenticator.attach(page);
-  const rp = new RpPage(page);
-  await rp.goto();
-
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+test('re-registering without excludeCredentials keeps both credentials on the RP', async ({ rp }) => {
+  await rp.registerOk('alice');
   const { userHandle } = await rpApi.user('alice');
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+  await rp.registerOk('alice');
 
   const alice = await rpApi.user('alice');
   expect(alice.userHandle).toBe(userHandle);
   expect(alice.credentials).toHaveLength(2);
 });
 
-test('rejects assertions for credentials it does not know', async ({ page }) => {
-  await VirtualAuthenticator.attach(page);
-  const rp = new RpPage(page);
-  await rp.goto();
-
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+test('rejects assertions for credentials it does not know', async ({ rp }) => {
+  await rp.registerOk('alice');
   await rpApi.reset();
   await rp.login();
   await rp.expectResult('rejected:unknown-credential');
@@ -87,12 +74,8 @@ test('rejects assertions for credentials it does not know', async ({ page }) => 
   await rp.expectResult('rejected:unknown-user');
 });
 
-test('conditional page starts an autofill login on load', async ({ page }) => {
-  await VirtualAuthenticator.attach(page);
-  const rp = new RpPage(page);
-  await rp.goto();
-  await rp.register('alice');
-  await rp.expectResult('registered:alice');
+test('conditional page starts an autofill login on load', async ({ rp }) => {
+  await rp.registerOk('alice');
 
   // With automaticPresenceSimulation the virtual authenticator answers the conditional
   // request by itself, so the login completes without any click.

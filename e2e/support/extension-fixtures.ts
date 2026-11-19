@@ -6,6 +6,7 @@ import { chromium, expect, type Locator, type Page, test as base, type Worker } 
 import { type Account, PkbApi } from './pkb-api.ts';
 import { RpPage, rpApi } from './rp.ts';
 import { readStackState, type StackState } from './stack.ts';
+import { VirtualAuthenticator } from './virtual-authenticator.ts';
 
 // chrome.* inside the extension service worker (CONTRACT §4.3).
 declare const chrome: {
@@ -77,6 +78,8 @@ type Fixtures = {
   extension: PkbExtension;
   rp: RpPage;
   ui: PkbUi;
+  /** Opt-in: catches anything that reaches Chrome's native WebAuthn implementation. */
+  authenticator: VirtualAuthenticator;
 };
 
 export const test = base.extend<Fixtures>({
@@ -90,9 +93,7 @@ export const test = base.extend<Fixtures>({
 
   cleanState: [
     async ({ stack, pkb }, use) => {
-      await rpApi.reset();
-      await pkb.clearCredentials(stack.users.a);
-      await pkb.clearCredentials(stack.users.b);
+      await Promise.all([rpApi.reset(), pkb.clearCredentials(stack.users.a), pkb.clearCredentials(stack.users.b)]);
       await use();
     },
     { auto: true },
@@ -127,6 +128,10 @@ export const test = base.extend<Fixtures>({
 
   ui: async ({ page }, use) => {
     await use(new PkbUi(page));
+  },
+
+  authenticator: async ({ page }, use) => {
+    await use(await VirtualAuthenticator.attach(page));
   },
 });
 
