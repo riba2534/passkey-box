@@ -24,8 +24,8 @@ import {
   type CoseAlgorithm,
 } from "../src/lib/authenticator";
 import { base64urlToBytes, bytesToBase64url, utf8 } from "../src/lib/base64url";
+import { hex } from "./fixtures";
 
-const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 const fromHex = (s: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(s, "hex"));
 
 describe("constants", () => {

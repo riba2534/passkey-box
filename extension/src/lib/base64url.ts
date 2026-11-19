@@ -4,12 +4,17 @@ export type Bytes = Uint8Array<ArrayBuffer>;
 
 const CHUNK = 0x8000;
 
-export function bytesToBase64url(bytes: Uint8Array): string {
+/** Standard, padded base64 (RFC 4648 §4). */
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += CHUNK) {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary);
+}
+
+export function bytesToBase64url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export function base64urlToBytes(input: string): Bytes {

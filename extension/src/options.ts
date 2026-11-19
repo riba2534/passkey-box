@@ -4,7 +4,7 @@ import { CONFIG_KEY } from "./lib/config";
 import { verifyLogin } from "./lib/login";
 import { serverHost } from "./lib/popup-model";
 import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from "./lib/storage";
-import { h, icon } from "./ui/dom";
+import { button, h, icon } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
 import { LOGO } from "./ui/icons";
 
@@ -19,11 +19,7 @@ async function render(): Promise<void> {
         "div",
         { class: "status ok" },
         h(document, "span", {}, "已登录 ", h(document, "strong", {}, config.username), ` · ${serverHost(config.serverUrl)}`),
-        (() => {
-          const out = h(document, "button", { type: "button", class: "btn ghost danger-text" }, "退出登录");
-          out.addEventListener("click", () => void clearConfig());
-          return out;
-        })(),
+        button(document, "退出登录", "ghost danger-text", () => void clearConfig()),
       )
     : h(document, "div", { class: "status" }, "尚未登录。填写服务器地址、用户名和密码后即可使用服务器上保存的通行密钥。");
 

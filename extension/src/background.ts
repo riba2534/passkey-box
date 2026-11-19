@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse: (
     loadSettings,
     store: (config) => new ServerClient(config),
   }).then(sendResponse, (err: unknown) => {
-    sendResponse({ action: "error", rpId: "", message: describeError(err) });
+    sendResponse({ action: "error", message: describeError(err) });
   });
   return true;
 });

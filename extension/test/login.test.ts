@@ -1,18 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FetchLike } from "../src/lib/api";
 import { verifyLogin } from "../src/lib/login";
-
-function fakeFetch(handler: (url: string, init: RequestInit) => Response | Promise<Response>) {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const fn: FetchLike = async (url, init = {}) => {
-    calls.push({ url, init });
-    return handler(url, init);
-  };
-  return { fn, calls };
-}
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+import { fakeFetch, json } from "./fixtures";
 
 describe("verifyLogin", () => {
   it("normalizes the server URL and returns the config on success", async () => {

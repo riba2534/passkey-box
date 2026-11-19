@@ -3,14 +3,13 @@ import { toPublicKeyCredential } from "../src/lib/credential-object";
 import { serializeCreationOptions, serializeRequestOptions } from "../src/lib/serialize";
 import {
   assertionJSON,
+  bytes,
   FakeAssertionResponse,
   FakeAttestationResponse,
   FakePublicKeyCredential,
   fakeRealm,
   registrationJSON,
 } from "./fixtures";
-
-const bytes = (...b: number[]) => new Uint8Array(b);
 
 describe("serializeCreationOptions", () => {
   it("converts BufferSources to base64url and keeps the relevant fields", () => {
@@ -37,9 +36,7 @@ describe("serializeCreationOptions", () => {
         { type: "public-key", alg: -7 },
         { type: "public-key", alg: -257 },
       ],
-      timeout: 60000,
-      excludeCredentials: [{ type: "public-key", id: "BAU", transports: ["internal"] }],
-      attestation: "none",
+      excludeCredentials: [{ type: "public-key", id: "BAU" }],
       extensions: { credProps: true },
     });
     expect(JSON.parse(JSON.stringify(out))).toEqual(out);
@@ -69,7 +66,7 @@ describe("serializeCreationOptions", () => {
 });
 
 describe("serializeRequestOptions", () => {
-  it("converts challenge and allowCredentials", () => {
+  it("converts challenge and allowCredentials and keeps only the relevant fields", () => {
     expect(
       serializeRequestOptions({
         challenge: bytes(1, 2, 3),
@@ -81,8 +78,6 @@ describe("serializeRequestOptions", () => {
     ).toEqual({
       challenge: "AQID",
       rpId: "example.com",
-      timeout: 1000,
-      userVerification: "required",
       allowCredentials: [{ type: "public-key", id: "_w" }],
     });
     expect(serializeRequestOptions({ challenge: bytes(1) })).toEqual({ challenge: "AQ", allowCredentials: [] });

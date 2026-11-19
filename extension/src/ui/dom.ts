@@ -44,3 +44,16 @@ export function icon(doc: Document, spec: IconSpec, className?: string): SVGSVGE
   }
   return svg;
 }
+
+/** `<button type="button" class="btn {variant}">`, optionally with a leading icon. */
+export function button(
+  doc: Document,
+  label: string,
+  variant: string,
+  onClick: () => void,
+  glyph?: IconSpec,
+): HTMLButtonElement {
+  const el = h(doc, "button", { type: "button", class: `btn ${variant}` }, glyph ? icon(doc, glyph, "btn-icon") : null, label);
+  el.addEventListener("click", onClick);
+  return el;
+}

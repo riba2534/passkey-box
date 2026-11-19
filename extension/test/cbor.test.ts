@@ -1,8 +1,7 @@
 import { isoCBOR } from "@simplewebauthn/server/helpers";
 import { describe, expect, it } from "vitest";
 import { encodeCbor, type CborValue } from "../src/lib/cbor";
-
-const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+import { hex } from "./fixtures";
 
 describe("encodeCbor", () => {
   // RFC 8949 Appendix A

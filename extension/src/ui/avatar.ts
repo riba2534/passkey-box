@@ -1,5 +1,7 @@
 // Coloured letter avatars, 1Password style.
 
+import { h } from "./dom";
+
 export const AVATAR_COLORS = [
   "#0572EC",
   "#7B61FF",
@@ -22,4 +24,10 @@ export function avatarColor(seed: string): string {
 export function avatarLetter(text: string): string {
   const first = Array.from(text.trim())[0];
   return first ? first.toUpperCase() : "?";
+}
+
+export function avatar(doc: Document, seed: string, label: string, className = "avatar"): HTMLElement {
+  const el = h(doc, "span", { class: className }, avatarLetter(label));
+  el.style.backgroundColor = avatarColor(seed);
+  return el;
 }

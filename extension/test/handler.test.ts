@@ -1,6 +1,7 @@
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Credential, type NewCredential } from "../src/lib/api";
+import { bytesToBase64url, utf8 } from "../src/lib/base64url";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "../src/lib/authenticator";
 import type { Config, Settings } from "../src/lib/config";
 import { handleRequest, type CredentialStore } from "../src/lib/handler";
@@ -67,7 +68,7 @@ const getReq = (options = getOptions(), extra: { mediation?: string; credentialI
 
 async function register(store: MemoryStore, name: string, alg = -7) {
   const res = await handleRequest(
-    createReq(createOptions({ user: { id: btoa(name).replace(/=/g, ""), name, displayName: name.toUpperCase() }, pubKeyCredParams: [{ type: "public-key", alg }] })),
+    createReq(createOptions({ user: { id: bytesToBase64url(utf8(name)), name, displayName: name.toUpperCase() }, pubKeyCredParams: [{ type: "public-key", alg }] })),
     deps(store),
   );
   if (res.action !== "success") throw new Error(`register failed: ${JSON.stringify(res)}`);
@@ -158,7 +159,10 @@ describe("handleRequest: create", () => {
   it("shows an error dialog when the server fails", async () => {
     const store = new MemoryStore();
     store.failCreate = true;
-    expect(await handleRequest(createReq(), deps(store))).toMatchObject({ action: "error", rpId: "example.com" });
+    expect(await handleRequest(createReq(), deps(store))).toMatchObject({
+      action: "error",
+      message: expect.stringContaining("保存通行密钥失败"),
+    });
     const store2 = new MemoryStore();
     store2.failList = true;
     expect(
@@ -170,7 +174,7 @@ describe("handleRequest: create", () => {
 describe("handleRequest: get", () => {
   it("0 candidates → empty dialog", async () => {
     const store = new MemoryStore();
-    expect(await handleRequest(getReq(), deps(store))).toEqual({ action: "empty", rpId: "example.com" });
+    expect(await handleRequest(getReq(), deps(store))).toEqual({ action: "empty" });
     expect(store.listCalls).toEqual(["example.com"]);
   });
 
@@ -264,7 +268,10 @@ describe("handleRequest: get", () => {
   it("server errors → error dialog", async () => {
     const store = new MemoryStore();
     store.failList = true;
-    expect(await handleRequest(getReq(), deps(store))).toMatchObject({ action: "error", rpId: "example.com" });
+    expect(await handleRequest(getReq(), deps(store))).toMatchObject({
+      action: "error",
+      message: expect.stringContaining("无法连接服务器"),
+    });
   });
 
   it("use() failures do not affect the login", async () => {

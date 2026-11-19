@@ -1,17 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, basicAuthHeader, describeError, ServerClient, type FetchLike } from "../src/lib/api";
-
-function fakeFetch(handler: (url: string, init: RequestInit) => Response | Promise<Response>) {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const fn: FetchLike = async (url, init = {}) => {
-    calls.push({ url, init });
-    return handler(url, init);
-  };
-  return { fn, calls };
-}
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+import { ApiError, basicAuthHeader, describeError, ServerClient } from "../src/lib/api";
+import { fakeFetch, json } from "./fixtures";
 
 const config = { serverUrl: "http://127.0.0.1:18411", username: "alice", password: "secret" };
 

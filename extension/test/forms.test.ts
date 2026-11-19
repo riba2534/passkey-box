@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/lib/config";
 import type { LoginResult } from "../src/lib/login";
 import { loginForm, settingsPanel } from "../src/ui/forms";
-
-const flush = () => new Promise((r) => setTimeout(r, 0));
+import { flush } from "./fixtures";
 
 function mount(opts: Partial<Parameters<typeof loginForm>[1]> = {}) {
   const verify = vi.fn<(input: { serverUrl: string; username: string; password: string }) => Promise<LoginResult>>();

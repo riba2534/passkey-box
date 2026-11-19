@@ -74,7 +74,7 @@ export function loginForm(doc: Document, opts: LoginFormOptions): HTMLFormElemen
   return form;
 }
 
-export const SETTING_LABELS: Record<keyof Settings, { title: string; desc: string }> = {
+const SETTING_LABELS: Record<keyof Settings, { title: string; desc: string }> = {
   autoLoginSingle: {
     title: "只匹配到一个时自动登录",
     desc: "网站请求通行密钥时，如果只找到一个账号，直接使用它登录，不弹出选择框。",

@@ -2,7 +2,7 @@
 // Kept free of direct `window` access so it can be unit tested with fake globals.
 
 import { toPublicKeyCredential, type CredentialRealm } from "./credential-object";
-import { PAGE_CHANNEL, type PageRequest, type PageResult, type ToContent, type ToPage } from "./protocol";
+import { PAGE_CHANNEL, type Op, type PageRequest, type PageResult, type ToContent, type ToPage } from "./protocol";
 import { serializeCreationOptions, serializeRequestOptions } from "./serialize";
 
 export interface PageTransport {
@@ -19,7 +19,6 @@ export interface PageGlobals extends CredentialRealm {
   DOMException: typeof DOMException;
 }
 
-type Op = "create" | "get";
 type NativeFn = (this: unknown, options?: unknown) => Promise<unknown>;
 
 interface Pending {

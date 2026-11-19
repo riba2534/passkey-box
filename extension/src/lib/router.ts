@@ -5,15 +5,14 @@ import type {
   BackgroundResponse,
   CallerInfo,
   CandidateSummary,
+  Op,
   PageResult,
   ToastKind,
   ToContent,
   ToPage,
 } from "./protocol";
-import { PAGE_CHANNEL } from "./protocol";
+import { PAGE_CHANNEL, requestedRpId } from "./protocol";
 import { effectiveRpId } from "./rpid";
-
-export type Op = "create" | "get";
 
 export type UiChoice = { kind: "select"; credentialId: string } | { kind: "cancel" } | { kind: "fallback" } | { kind: "closed" };
 
@@ -49,13 +48,13 @@ export function createContentRouter(deps: ContentDeps): { handle(message: ToCont
     deps.post({ channel: PAGE_CHANNEL, dir: "to-page", kind: "response", id, result });
   }
 
-  async function call(request: BackgroundRequest, rpId: string): Promise<BackgroundResponse> {
+  async function call(request: BackgroundRequest): Promise<BackgroundResponse> {
     try {
       const response = await deps.send(request);
-      return response ?? { action: "error", rpId, message: "扩展后台没有响应，请刷新页面后重试。" };
+      return response ?? { action: "error", message: "扩展后台没有响应，请刷新页面后重试。" };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { action: "error", rpId, message: `无法连接扩展后台：${message}。请刷新页面后重试。` };
+      return { action: "error", message: `无法连接扩展后台：${message}。请刷新页面后重试。` };
     }
   }
 
@@ -75,12 +74,10 @@ export function createContentRouter(deps: ContentDeps): { handle(message: ToCont
       message.op === "create"
         ? { type: "pkb:create", caller, options: message.options }
         : { type: "pkb:get", caller, options: message.options, ...(message.mediation ? { mediation: message.mediation } : {}) };
-    const fallbackRpId = effectiveRpId(
-      message.op === "create" ? message.options.rp.id : message.options.rpId,
-      caller.hostname,
-    );
+    // The background derives the same rpId from the same request; dialogs only need it for display.
+    const rpId = effectiveRpId(requestedRpId(message.options), caller.hostname);
 
-    let response = await call(request, fallbackRpId);
+    let response = await call(request);
     while (active.has(id)) {
       let choice: UiChoice;
       switch (response.action) {
@@ -95,20 +92,20 @@ export function createContentRouter(deps: ContentDeps): { handle(message: ToCont
         case "pending":
           return; // stays active until the page aborts
         case "picker":
-          choice = await deps.ui.showPicker(id, response.rpId, response.candidates);
+          choice = await deps.ui.showPicker(id, rpId, response.candidates);
           break;
         case "empty":
-          choice = await deps.ui.showEmpty(id, response.rpId);
+          choice = await deps.ui.showEmpty(id, rpId);
           break;
         case "error":
-          choice = await deps.ui.showError(id, op, response.rpId || fallbackRpId, response.message);
+          choice = await deps.ui.showError(id, op, rpId, response.message);
           break;
       }
       if (!active.has(id) || choice.kind === "closed") return;
       if (choice.kind === "cancel") return reply(id, { type: "error", name: "NotAllowedError", message: NOT_ALLOWED_MESSAGE });
       if (choice.kind === "fallback") return reply(id, { type: "fallback" });
       if (request.type !== "pkb:get") return reply(id, { type: "error", name: "NotAllowedError", message: NOT_ALLOWED_MESSAGE });
-      response = await call({ ...request, credentialId: choice.credentialId }, fallbackRpId);
+      response = await call({ ...request, credentialId: choice.credentialId });
     }
   }
 

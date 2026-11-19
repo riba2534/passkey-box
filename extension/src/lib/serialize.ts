@@ -27,11 +27,7 @@ function descriptors(list: unknown, what: string): CredentialDescriptorJSON[] {
   if (typeof (list as Iterable<unknown>)[Symbol.iterator] !== "function") throw new TypeError(`${what} must be a sequence`);
   return Array.from(list as Iterable<unknown>, (item, i) => {
     const d = asObject(item, `${what}[${i}]`);
-    const out: CredentialDescriptorJSON = { type: String(d["type"] ?? "public-key"), id: binary(d["id"], `${what}[${i}].id`) };
-    if (d["transports"] && typeof (d["transports"] as Iterable<unknown>)[Symbol.iterator] === "function") {
-      out.transports = Array.from(d["transports"] as Iterable<unknown>, String);
-    }
-    return out;
+    return { type: String(d["type"] ?? "public-key"), id: binary(d["id"], `${what}[${i}].id`) };
   });
 }
 
@@ -61,9 +57,6 @@ export function serializeCreationOptions(publicKey: unknown): CreationOptionsJSO
   };
   const rpId = optionalString(rp["id"]);
   if (rpId !== undefined) out.rp.id = rpId;
-  if (typeof pk["timeout"] === "number") out.timeout = pk["timeout"];
-  const attestation = optionalString(pk["attestation"]);
-  if (attestation !== undefined) out.attestation = attestation;
   return out;
 }
 
@@ -75,8 +68,5 @@ export function serializeRequestOptions(publicKey: unknown): RequestOptionsJSON 
   };
   const rpId = optionalString(pk["rpId"]);
   if (rpId !== undefined) out.rpId = rpId;
-  if (typeof pk["timeout"] === "number") out.timeout = pk["timeout"];
-  const uv = optionalString(pk["userVerification"]);
-  if (uv !== undefined) out.userVerification = uv;
   return out;
 }

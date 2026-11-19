@@ -1,8 +1,8 @@
 // In-page dialogs and toasts (CONTRACT 4.6), rendered in an open shadow root on <passkey-box-ui>.
 
-import type { ContentUI, Op, UiChoice } from "../lib/router";
-import type { CandidateSummary, ToastKind } from "../lib/protocol";
-import { avatarColor, avatarLetter } from "./avatar";
+import type { ContentUI, UiChoice } from "../lib/router";
+import type { CandidateSummary, Op, ToastKind } from "../lib/protocol";
+import { avatar } from "./avatar";
 import { h, icon } from "./dom";
 import { CHECK, CHEVRON, INFO, KEY_OUTLINE, LOGO, WARNING } from "./icons";
 
@@ -13,7 +13,7 @@ const TOAST_FADE_MS = 200;
 const FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-export const PAGE_UI_CSS = `
+const PAGE_UI_CSS = `
 :host { all: initial; position: fixed; top: 16px; right: 16px; z-index: 2147483647; display: block; }
 .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; font: 14px/1.45 ${FONT}; color: #1b1f24; -webkit-font-smoothing: antialiased; }
 .card { box-sizing: border-box; width: 360px; max-width: calc(100vw - 32px); background: #fff; border-radius: 12px; overflow: hidden;
@@ -151,13 +151,11 @@ export function createPageUI(doc: Document = document): PageUI {
   function accountButton(c: CandidateSummary): HTMLElement {
     const display = c.user_display_name && c.user_display_name !== c.user_name ? c.user_display_name : "";
     const primary = display || c.user_name || "（无用户名）";
-    const avatar = h(doc, "span", { class: "avatar" }, avatarLetter(primary));
-    avatar.style.backgroundColor = avatarColor(primary);
     return h(
       doc,
       "button",
       { type: "button", class: "account", "data-pkb-credential-id": c.id, title: c.user_name },
-      avatar,
+      avatar(doc, primary, primary),
       h(
         doc,
         "span",

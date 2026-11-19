@@ -1,13 +1,12 @@
 // Message shapes exchanged between inject (MAIN world), content (ISOLATED world) and background.
 
-import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "./authenticator";
+import type { AuthenticationResponseJSON, CallerContext, RegistrationResponseJSON } from "./authenticator";
 
 export const PAGE_CHANNEL = "passkey-box";
 
 export interface CredentialDescriptorJSON {
   type: string;
   id: string;
-  transports?: string[];
 }
 
 export interface CreationOptionsJSON {
@@ -15,27 +14,30 @@ export interface CreationOptionsJSON {
   user: { id: string; name: string; displayName: string };
   challenge: string;
   pubKeyCredParams: Array<{ type: string; alg: number }>;
-  timeout?: number;
   excludeCredentials: CredentialDescriptorJSON[];
-  attestation?: string;
   extensions: { credProps?: boolean };
 }
 
 export interface RequestOptionsJSON {
   challenge: string;
-  timeout?: number;
   rpId?: string;
   allowCredentials: CredentialDescriptorJSON[];
-  userVerification?: string;
 }
 
 export type CredentialJSON = RegistrationResponseJSON | AuthenticationResponseJSON;
+
+/** rp.id for create, rpId for get; undefined means "use the page hostname". */
+export function requestedRpId(options: CreationOptionsJSON | RequestOptionsJSON): string | undefined {
+  return "rp" in options ? options.rp.id : options.rpId;
+}
 
 // ---------------------------------------------------------------- page <-> content (window.postMessage)
 
 export type PageRequest =
   | { op: "create"; options: CreationOptionsJSON; mediation?: string }
   | { op: "get"; options: RequestOptionsJSON; mediation?: string };
+
+export type Op = PageRequest["op"];
 
 export type PageResult =
   | { type: "success"; credential: CredentialJSON }
@@ -66,11 +68,8 @@ export function isToPage(data: unknown): data is ToPage {
 
 // ---------------------------------------------------------------- content <-> background (runtime messages)
 
-export interface CallerInfo {
-  origin: string;
+export interface CallerInfo extends CallerContext {
   hostname: string;
-  crossOrigin: boolean;
-  topOrigin?: string;
 }
 
 export type BackgroundRequest =
@@ -97,7 +96,7 @@ export type BackgroundResponse =
   | { action: "fallback" }
   | { action: "success"; credential: CredentialJSON; toast: ToastKind; userName: string }
   | { action: "reject"; name: string; message: string; toast?: ToastKind }
-  | { action: "picker"; rpId: string; candidates: CandidateSummary[] }
-  | { action: "empty"; rpId: string }
+  | { action: "picker"; candidates: CandidateSummary[] }
+  | { action: "empty" }
   | { action: "pending" }
-  | { action: "error"; rpId: string; message: string };
+  | { action: "error"; message: string };

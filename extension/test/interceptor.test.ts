@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { CAPABILITY_OVERRIDES, installInterceptor, type PageGlobals } from "../src/lib/interceptor";
 import { PAGE_CHANNEL, type PageResult, type ToContent, type ToPage } from "../src/lib/protocol";
-import { assertionJSON, FakeAssertionResponse, FakeAttestationResponse, FakePublicKeyCredential, registrationJSON } from "./fixtures";
-
-const bytes = (...b: number[]) => new Uint8Array(b);
+import {
+  assertionJSON,
+  bytes,
+  FakeAssertionResponse,
+  FakeAttestationResponse,
+  FakePublicKeyCredential,
+  registrationJSON,
+} from "./fixtures";
 
 const createOptions = () => ({
   publicKey: {

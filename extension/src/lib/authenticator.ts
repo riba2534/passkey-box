@@ -10,18 +10,18 @@ export type CoseAlgorithm = typeof ALG_ES256 | typeof ALG_RS256;
 
 export const AAGUID = "b1d8a1c4-5f3e-4a6b-9c2d-7e8f9a0b1c2d";
 
-export const FLAG_UP = 0x01;
-export const FLAG_UV = 0x04;
-export const FLAG_BE = 0x08;
-export const FLAG_BS = 0x10;
-export const FLAG_AT = 0x40;
+const FLAG_UP = 0x01;
+const FLAG_UV = 0x04;
+const FLAG_BE = 0x08;
+const FLAG_BS = 0x10;
+const FLAG_AT = 0x40;
 /** UP|UV|BE|BS|AT */
 export const FLAGS_REGISTER = FLAG_UP | FLAG_UV | FLAG_BE | FLAG_BS | FLAG_AT;
 /** UP|UV|BE|BS */
 export const FLAGS_ASSERT = FLAG_UP | FLAG_UV | FLAG_BE | FLAG_BS;
 
-export const TRANSPORTS = ["hybrid", "internal"];
-export const CREDENTIAL_ID_LENGTH = 32;
+const TRANSPORTS = ["hybrid", "internal"];
+const CREDENTIAL_ID_LENGTH = 32;
 
 const subtle = (): SubtleCrypto => globalThis.crypto.subtle;
 
@@ -33,7 +33,7 @@ export function aaguidBytes(uuid: string = AAGUID): Bytes {
   return out;
 }
 
-export function randomCredentialId(): Bytes {
+function randomCredentialId(): Bytes {
   return globalThis.crypto.getRandomValues(new Uint8Array(CREDENTIAL_ID_LENGTH));
 }
 
@@ -68,7 +68,7 @@ export function coseRsaPublicKey(n: Uint8Array, e: Uint8Array): Bytes {
 
 // ---------------------------------------------------------------- authenticatorData
 
-export function encodeUint32(n: number): Bytes {
+function encodeUint32(n: number): Bytes {
   const out = new Uint8Array(4);
   new DataView(out.buffer).setUint32(0, n >>> 0);
   return out;
@@ -253,7 +253,7 @@ export async function createRegistration(input: RegistrationInput): Promise<Regi
     0,
     attestedCredentialData(aaguidBytes(), credentialId, key.cosePublicKey),
   );
-  const cdj = clientDataJSON({ type: "webauthn.create", challenge: input.challenge, ...callerFields(input) });
+  const cdj = clientDataJSON({ ...input, type: "webauthn.create" });
   const id = bytesToBase64url(credentialId);
   return {
     credentialId: id,
@@ -292,7 +292,7 @@ export interface AssertionInput extends CallerContext {
 export async function createAssertion(input: AssertionInput): Promise<AuthenticationResponseJSON> {
   const rpIdHash = await sha256(utf8(input.rpId));
   const authData = authenticatorData(rpIdHash, FLAGS_ASSERT, 0);
-  const cdjBytes = utf8(clientDataJSON({ type: "webauthn.get", challenge: input.challenge, ...callerFields(input) }));
+  const cdjBytes = utf8(clientDataJSON({ ...input, type: "webauthn.get" }));
   const signature = await signWithPkcs8(
     input.alg,
     base64urlToBytes(input.privateKey),
@@ -312,10 +312,4 @@ export async function createAssertion(input: AssertionInput): Promise<Authentica
     response,
     clientExtensionResults: {},
   };
-}
-
-function callerFields(ctx: CallerContext): CallerContext {
-  return ctx.topOrigin === undefined
-    ? { origin: ctx.origin, crossOrigin: ctx.crossOrigin }
-    : { origin: ctx.origin, crossOrigin: ctx.crossOrigin, topOrigin: ctx.topOrigin };
 }

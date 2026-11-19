@@ -8,7 +8,7 @@ import {
   type ToPage,
 } from "../src/lib/protocol";
 import { createContentRouter, NOT_ALLOWED_MESSAGE, toastText, type ContentUI, type UiChoice } from "../src/lib/router";
-import { assertionJSON, registrationJSON } from "./fixtures";
+import { assertionJSON, flush, registrationJSON } from "./fixtures";
 
 const caller: CallerInfo = { origin: "https://login.example.com", hostname: "login.example.com", crossOrigin: false };
 
@@ -78,8 +78,6 @@ function setup(responses: Array<BackgroundResponse | Error | undefined>) {
   return { router, sent, posted, dialogs, ui };
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
 describe("content router", () => {
   it("forwards get requests with caller info and mediation", async () => {
     const { router, sent } = setup([{ action: "pending" }]);
@@ -124,12 +122,12 @@ describe("content router", () => {
       { id: "b", user_name: "b@x", user_display_name: "B", rp_id: "example.com" },
     ];
     const { router, posted, sent, dialogs, ui } = setup([
-      { action: "picker", rpId: "example.com", candidates },
+      { action: "picker", candidates },
       { action: "success", credential: assertionJSON, toast: "signed-in", userName: "b@x" },
     ]);
     const done = router.handle(getRequest());
     await flush();
-    expect(dialogs[0]).toMatchObject({ kind: "picker", id: "r1", args: ["example.com", candidates] });
+    expect(dialogs[0]).toMatchObject({ kind: "picker", id: "r1", args: ["login.example.com", candidates] });
     dialogs[0]!.choice.resolve({ kind: "select", credentialId: "b" });
     await done;
     expect(sent[1]).toMatchObject({ type: "pkb:get", credentialId: "b" });
@@ -138,9 +136,9 @@ describe("content router", () => {
   });
 
   it.each<[string, BackgroundResponse]>([
-    ["picker", { action: "picker", rpId: "example.com", candidates: [] }],
-    ["empty", { action: "empty", rpId: "example.com" }],
-    ["error", { action: "error", rpId: "example.com", message: "down" }],
+    ["picker", { action: "picker", candidates: [] }],
+    ["empty", { action: "empty" }],
+    ["error", { action: "error", message: "down" }],
   ])("%s dialog: cancel → NotAllowedError, fallback → native", async (_kind, response) => {
     const cancel = setup([response]);
     const p1 = cancel.router.handle(getRequest());
@@ -158,14 +156,14 @@ describe("content router", () => {
   });
 
   it("error dialogs get the operation and rpId", async () => {
-    const { router, dialogs } = setup([{ action: "error", rpId: "", message: "upload failed" }]);
+    const { router, dialogs } = setup([{ action: "error", message: "upload failed" }]);
     void router.handle(createRequest());
     await flush();
     expect(dialogs[0]).toMatchObject({ kind: "error", args: ["create", "example.com", "upload failed"] });
   });
 
   it("abort while a dialog is open closes it and posts nothing", async () => {
-    const { router, posted, dialogs, ui } = setup([{ action: "empty", rpId: "example.com" }]);
+    const { router, posted, dialogs, ui } = setup([{ action: "empty" }]);
     const done = router.handle(getRequest());
     await flush();
     await router.handle({ channel: PAGE_CHANNEL, dir: "to-content", kind: "abort", id: "r1" });

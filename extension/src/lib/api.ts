@@ -1,6 +1,6 @@
 // Passkey Box server client (docs/API.md). Every request carries HTTP Basic credentials.
 
-import { bytesToBase64url, utf8 } from "./base64url";
+import { bytesToBase64, utf8 } from "./base64url";
 import type { Config } from "./config";
 
 export interface User {
@@ -58,8 +58,7 @@ export class ApiError extends Error {
 
 /** `Basic base64(utf8(username + ":" + password))` */
 export function basicAuthHeader(username: string, password: string): string {
-  const b64 = bytesToBase64url(utf8(`${username}:${password}`)).replace(/-/g, "+").replace(/_/g, "/");
-  return "Basic " + b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+  return "Basic " + bytesToBase64(utf8(`${username}:${password}`));
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

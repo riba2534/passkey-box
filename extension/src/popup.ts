@@ -5,18 +5,12 @@ import { CONFIG_KEY, type Config, type Settings } from "./lib/config";
 import { verifyLogin } from "./lib/login";
 import { credentialTitle, formatTime, groupCredentials, serverHost, siteUrl, tabHostname } from "./lib/popup-model";
 import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from "./lib/storage";
-import { avatarColor, avatarLetter } from "./ui/avatar";
-import { h, icon } from "./ui/dom";
+import { avatar } from "./ui/avatar";
+import { button, h, icon } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
 import { BACK, CHEVRON, GEAR, LOGO, SEARCH } from "./ui/icons";
 
 const app = document.getElementById("app")!;
-
-function avatar(seed: string, label: string, size: "sm" | "lg" = "sm"): HTMLElement {
-  const el = h(document, "span", { class: `avatar avatar-${size}` }, avatarLetter(label));
-  el.style.backgroundColor = avatarColor(seed);
-  return el;
-}
 
 function flash(text: string): void {
   const el = h(document, "div", { class: "flash", role: "status" }, text);
@@ -63,9 +57,7 @@ function renderLogin(): void {
 // ---------------------------------------------------------------- signed in
 
 interface MainState {
-  config: Config;
   settings: Settings;
-  hostname: string;
   query: string;
   credentials: Credential[] | null;
   error: string;
@@ -73,7 +65,7 @@ interface MainState {
 
 function renderMain(config: Config, settings: Settings, hostname: string): void {
   const client = new ServerClient(config);
-  const state: MainState = { config, settings, hostname, query: "", credentials: null, error: "" };
+  const state: MainState = { settings, query: "", credentials: null, error: "" };
   const view = h(document, "main", { class: "view" });
 
   const search = h(document, "input", { type: "search", placeholder: "搜索通行密钥", "aria-label": "搜索通行密钥", spellcheck: "false" });
@@ -97,7 +89,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       document,
       "div",
       { class: "account-info" },
-      avatar(config.username, config.username),
+      avatar(document, config.username, config.username, "avatar avatar-sm"),
       h(
         document,
         "div",
@@ -110,9 +102,9 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       document,
       "div",
       { class: "account-actions" },
-      button("打开 Web 后台", "ghost", () => void chrome.tabs.create({ url: config.serverUrl })),
-      button("设置", "ghost", showSettings, GEAR),
-      button("退出登录", "ghost danger-text", () => void clearConfig()),
+      button(document, "打开 Web 后台", "ghost", () => void chrome.tabs.create({ url: config.serverUrl })),
+      button(document, "设置", "ghost", showSettings, GEAR),
+      button(document, "退出登录", "ghost danger-text", () => void clearConfig()),
     ),
   );
 
@@ -138,7 +130,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       document,
       "button",
       { type: "button", class: "item", "data-credential-id": c.id },
-      avatar(c.rp_id, title),
+      avatar(document, c.rp_id, title, "avatar avatar-sm"),
       h(
         document,
         "span",
@@ -165,7 +157,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
   function showList(): void {
     topbar.hidden = false;
     if (state.error) {
-      const retry = button("重试", "secondary", () => void refresh());
+      const retry = button(document, "重试", "secondary", () => void refresh());
       view.replaceChildren(
         h(document, "div", { class: "state" }, h(document, "p", { class: "state-error" }, state.error), retry),
       );
@@ -187,17 +179,17 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       );
       return;
     }
-    const groups = groupCredentials(state.credentials, state.hostname, state.query);
+    const groups = groupCredentials(state.credentials, hostname, state.query);
     const sections: HTMLElement[] = [];
-    if (state.hostname) {
-      sections.push(section(`当前网站 · ${state.hostname}`, null, groups.current, state.query ? "没有匹配的通行密钥" : "当前网站没有保存的通行密钥"));
+    if (hostname) {
+      sections.push(section(`当前网站 · ${hostname}`, null, groups.current, state.query ? "没有匹配的通行密钥" : "当前网站没有保存的通行密钥"));
     }
     sections.push(section("全部通行密钥", groups.all.length, groups.all, "没有匹配的通行密钥"));
     view.replaceChildren(...sections);
   }
 
   function backBar(title: string): HTMLElement {
-    const back = button("返回", "back", () => showList(), BACK);
+    const back = button(document, "返回", "back", () => showList(), BACK);
     return h(document, "div", { class: "subbar" }, back, h(document, "span", { class: "subbar-title" }, title));
   }
 
@@ -212,7 +204,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       ["创建时间", formatTime(c.created_at, "—")],
       ["最近使用", formatTime(c.last_used_at)],
     ];
-    const del = button("删除", "danger", () => {
+    const del = button(document, "删除", "danger", () => {
       void (async () => {
         del.disabled = true;
         try {
@@ -233,7 +225,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
         document,
         "div",
         { class: "detail-hero" },
-        avatar(c.rp_id, title, "lg"),
+        avatar(document, c.rp_id, title, "avatar avatar-lg"),
         h(document, "div", {}, h(document, "div", { class: "detail-title" }, title), h(document, "div", { class: "muted" }, "通行密钥")),
       ),
       h(
@@ -246,13 +238,13 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
         document,
         "div",
         { class: "detail-actions" },
-        button("复制用户名", "secondary", () => {
+        button(document, "复制用户名", "secondary", () => {
           void navigator.clipboard.writeText(c.user_name).then(
             () => flash("已复制用户名"),
             () => flash("复制失败"),
           );
         }),
-        button("打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })),
+        button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })),
         del,
       ),
       status,
@@ -269,12 +261,6 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
       }),
     );
   }
-}
-
-function button(label: string, variant: string, onClick: () => void, glyph?: typeof LOGO): HTMLButtonElement {
-  const el = h(document, "button", { type: "button", class: `btn ${variant}` }, glyph ? icon(document, glyph, "btn-icon") : null, label);
-  el.addEventListener("click", onClick);
-  return el;
 }
 
 // ---------------------------------------------------------------- boot
