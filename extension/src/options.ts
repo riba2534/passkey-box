@@ -4,9 +4,9 @@ import { CONFIG_KEY } from "./lib/config";
 import { verifyLogin } from "./lib/login";
 import { serverHost } from "./lib/popup-model";
 import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from "./lib/storage";
-import { button, h, icon } from "./ui/dom";
+import { button, h } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
-import { LOGO } from "./ui/icons";
+import { LOGO_FILE, logo } from "./ui/logo";
 
 const app = document.getElementById("app")!;
 
@@ -30,7 +30,7 @@ async function render(): Promise<void> {
       document,
       "header",
       { class: "options-head" },
-      icon(document, LOGO, "options-logo"),
+      logo(document, "options-logo", LOGO_FILE),
       h(document, "div", {}, h(document, "h1", {}, "Passkey Box"), h(document, "p", { class: "muted" }, "通行密钥扩展设置")),
     ),
     h(

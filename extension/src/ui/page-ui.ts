@@ -4,7 +4,9 @@ import type { ContentUI, UiChoice } from "../lib/router";
 import type { CandidateSummary, Op, ToastKind } from "../lib/protocol";
 import { avatar } from "./avatar";
 import { h, icon } from "./dom";
-import { CHECK, CHEVRON, INFO, KEY_OUTLINE, LOGO, WARNING } from "./icons";
+import { CHECK, CHEVRON, INFO, KEY_OUTLINE, WARNING } from "./icons";
+import logoUrl from "../assets/logo-64.png";
+import { logo } from "./logo";
 
 export const HOST_TAG = "passkey-box-ui";
 export const TOAST_MS = 3000;
@@ -89,7 +91,8 @@ export function createPageUI(doc: Document = document): PageUI {
       doc,
       "header",
       { class: "head" },
-      icon(doc, LOGO, "logo"),
+      // Inlined as a data URL, so the page UI needs no web_accessible_resources.
+      logo(doc, "logo", logoUrl),
       h(
         doc,
         "div",

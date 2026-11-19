@@ -121,7 +121,8 @@ describe("empty and error dialogs", () => {
   it("does not interpret page data as HTML", () => {
     const ui = createPageUI(document);
     void ui.showPicker("r1", "<img src=x>", [{ id: "x", user_name: "<b>bold</b>", user_display_name: "", rp_id: "x" }]);
-    expect(ui.root()!.querySelector("img, b")).toBeNull();
+    // The only image is our own logo; nothing from the page may become markup.
+    expect(ui.root()!.querySelector("img:not(.logo), b")).toBeNull();
     expect(q(ui, "[data-pkb-credential-id]")!.textContent).toContain("<b>bold</b>");
   });
 });

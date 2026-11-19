@@ -8,7 +8,8 @@ import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from 
 import { avatar } from "./ui/avatar";
 import { button, h, icon } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
-import { BACK, CHEVRON, GEAR, LOGO, SEARCH } from "./ui/icons";
+import { BACK, CHEVRON, GEAR, SEARCH } from "./ui/icons";
+import { LOGO_FILE, logo } from "./ui/logo";
 
 const app = document.getElementById("app")!;
 
@@ -31,7 +32,7 @@ async function activeTabHostname(): Promise<string> {
 
 function renderLogin(): void {
   app.replaceChildren(
-    h(document, "header", { class: "topbar" }, icon(document, LOGO, "topbar-logo"), h(document, "span", { class: "topbar-title" }, "Passkey Box")),
+    h(document, "header", { class: "topbar" }, logo(document, "topbar-logo", LOGO_FILE), h(document, "span", { class: "topbar-title" }, "Passkey Box")),
     h(
       document,
       "main",
@@ -40,7 +41,7 @@ function renderLogin(): void {
         document,
         "div",
         { class: "login-hero" },
-        icon(document, LOGO, "hero-logo"),
+        logo(document, "hero-logo", LOGO_FILE),
         h(document, "h1", {}, "登录 Passkey Box"),
         h(document, "p", {}, "连接到你的 Passkey Box 服务器，即可在网站上自动使用保存的通行密钥。"),
       ),
@@ -77,7 +78,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
     document,
     "header",
     { class: "topbar" },
-    icon(document, LOGO, "topbar-logo"),
+    logo(document, "topbar-logo", LOGO_FILE),
     h(document, "label", { class: "search" }, icon(document, SEARCH, "search-icon"), search),
   );
 
