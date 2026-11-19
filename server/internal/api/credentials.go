@@ -1,0 +1,156 @@
+package api
+
+import (
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/riba2534/passkey-box/server/internal/store"
+)
+
+const (
+	algES256 = -7
+	algRS256 = -257
+)
+
+type credentialRequest struct {
+	ID              string `json:"id"`
+	RPID            string `json:"rp_id"`
+	RPName          string `json:"rp_name"`
+	UserHandle      string `json:"user_handle"`
+	UserName        string `json:"user_name"`
+	UserDisplayName string `json:"user_display_name"`
+	Alg             *int   `json:"alg"`
+	PrivateKey      string `json:"private_key"`
+	PublicKey       string `json:"public_key"`
+	SignCount       int64  `json:"sign_count"`
+	Label           string `json:"label"`
+	Origin          string `json:"origin"`
+}
+
+func isBase64URL(s string) bool {
+	_, err := base64.RawURLEncoding.DecodeString(s)
+	return err == nil
+}
+
+// validate checks the request and returns an error message, or "" if valid.
+func (c *credentialRequest) validate() string {
+	c.RPID = strings.TrimSpace(c.RPID)
+	switch {
+	case c.ID == "" || !isBase64URL(c.ID):
+		return "id must be a non-empty base64url string"
+	case c.RPID == "":
+		return "rp_id is required"
+	case c.UserHandle == "" || !isBase64URL(c.UserHandle):
+		return "user_handle must be a non-empty base64url string"
+	case c.PrivateKey == "" || !isBase64URL(c.PrivateKey):
+		return "private_key must be a non-empty base64url string"
+	case !isBase64URL(c.PublicKey):
+		return "public_key must be a base64url string"
+	case c.Alg == nil || (*c.Alg != algES256 && *c.Alg != algRS256):
+		return "alg must be -7 or -257"
+	case c.SignCount < 0:
+		return "sign_count must not be negative"
+	}
+	return ""
+}
+
+func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request, user store.User) {
+	s.writeCredentials(w, r, user.ID)
+}
+
+func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID int64) {
+	rpID := strings.TrimSpace(r.URL.Query().Get("rp_id"))
+	creds, err := s.opts.Store.ListCredentials(r.Context(), userID, rpID)
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"credentials": newCredentialViews(creds)})
+}
+
+func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+	var req credentialRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	if msg := req.validate(); msg != "" {
+		badRequest(w, msg)
+		return
+	}
+	cred, err := s.opts.Store.SaveCredential(r.Context(), user.ID, store.Credential{
+		ID:              req.ID,
+		RPID:            req.RPID,
+		RPName:          req.RPName,
+		UserHandle:      req.UserHandle,
+		UserName:        req.UserName,
+		UserDisplayName: req.UserDisplayName,
+		Alg:             *req.Alg,
+		PrivateKey:      req.PrivateKey,
+		PublicKey:       req.PublicKey,
+		SignCount:       req.SignCount,
+		Label:           req.Label,
+		Origin:          req.Origin,
+	}, s.opts.Now())
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", "credential id already exists")
+		return
+	}
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"credential": newCredentialView(cred)})
+}
+
+func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+	var req struct {
+		Label *string `json:"label"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	if req.Label == nil {
+		badRequest(w, "label is required")
+		return
+	}
+	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), user.ID, r.PathValue("id"), *req.Label)
+	if errors.Is(err, store.ErrNotFound) {
+		credentialNotFound(w)
+		return
+	}
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"credential": newCredentialView(cred)})
+}
+
+func (s *Server) handleUseCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+	err := s.opts.Store.MarkCredentialUsed(r.Context(), user.ID, r.PathValue("id"), s.opts.Now())
+	s.writeNoContent(w, err, credentialNotFound)
+}
+
+func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+	err := s.opts.Store.DeleteCredential(r.Context(), user.ID, r.PathValue("id"))
+	s.writeNoContent(w, err, credentialNotFound)
+}
+
+func credentialNotFound(w http.ResponseWriter) {
+	writeError(w, http.StatusNotFound, "not_found", "credential not found")
+}
+
+// writeNoContent answers 204 on success, notFound on store.ErrNotFound and 500 otherwise.
+func (s *Server) writeNoContent(w http.ResponseWriter, err error, notFound func(http.ResponseWriter)) {
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, store.ErrNotFound):
+		notFound(w)
+	default:
+		s.internalError(w, err)
+	}
+}
