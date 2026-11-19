@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Check the tag matches the extension version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(jq -r .version extension/static/manifest.json)
+          package=$(jq -r .version extension/package.json)
+          if [ "$tag" != "$manifest" ] || [ "$tag" != "$package" ]; then
+            echo "tag $GITHUB_REF_NAME does not match manifest.json ($manifest) / package.json ($package)" >&2
+            exit 1
+          fi
+
+      - name: Test and build
+        working-directory: extension
+        run: npm ci && npm run typecheck && npm test && npm run build
+
+      - name: Package
+        run: |
+          name="passkey-box-extension-${GITHUB_REF_NAME}.zip"
+          mkdir -p out
+          (cd extension/dist && zip -qr "../../out/$name" .)
+          (cd out && sha256sum "$name" > "$name.sha256")
+          ls -l out
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --verify-tag \
+            --title "Passkey Box $GITHUB_REF_NAME" \
+            --notes-file .github/release-notes.md \
+            --generate-notes
