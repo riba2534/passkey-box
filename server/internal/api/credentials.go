@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/riba2534/passkey-box/server/internal/store"
@@ -29,6 +30,12 @@ type credentialRequest struct {
 	Origin          string `json:"origin"`
 }
 
+// isHTTPURL reports whether s is an absolute http or https URL.
+func isHTTPURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 func isBase64URL(s string) bool {
 	_, err := base64.RawURLEncoding.DecodeString(s)
 	return err == nil
@@ -52,6 +59,8 @@ func (c *credentialRequest) validate() string {
 		return "alg must be -7 or -257"
 	case c.SignCount < 0:
 		return "sign_count must not be negative"
+	case c.Origin != "" && !isHTTPURL(c.Origin):
+		return "origin must be an http or https URL"
 	}
 	return ""
 }

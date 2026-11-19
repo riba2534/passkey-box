@@ -769,8 +769,15 @@
     container.replaceChildren(...nodes);
   }
 
+  // siteURL only trusts http(s) origins, so a stored "javascript:" origin
+  // can never become a clickable link.
   function siteURL(c) {
-    if (c.origin) return c.origin;
+    try {
+      const u = new URL(c.origin);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    } catch {
+      // Missing or unparsable origin: fall back to the RP ID.
+    }
     return 'https://' + c.rp_id;
   }
 
