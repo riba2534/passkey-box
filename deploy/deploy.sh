@@ -70,8 +70,14 @@ for i in \$(seq 1 30); do
   if curl -fsS http://127.0.0.1:$HOST_PORT/healthz; then echo; exit 0; fi
   sleep 1
 done
-echo "health check failed" >&2
+echo "health check failed, rolling back" >&2
 docker logs --tail 50 passkey-box >&2
+docker rm -f passkey-box >/dev/null
+if docker container inspect passkey-box-prev >/dev/null 2>&1; then
+  docker rename passkey-box-prev passkey-box
+  docker start passkey-box >/dev/null
+  echo "previous container restored" >&2
+fi
 exit 1
 REMOTE
-echo "==> deployed $VERSION; rollback: docker rm -f passkey-box && docker rename passkey-box-prev passkey-box && docker start passkey-box"
+echo "==> deployed $VERSION; manual rollback: docker rm -f passkey-box && docker rename passkey-box-prev passkey-box && docker start passkey-box"
