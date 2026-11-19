@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -132,8 +133,23 @@ func TestWebConsole(t *testing.T) {
 	if !strings.HasPrefix(r.header.Get("Content-Type"), "text/html") || !strings.Contains(string(r.body), "/assets/app.js") {
 		t.Fatalf("index: %s %s", r.header.Get("Content-Type"), r.body)
 	}
-	for _, p := range []string{"/assets/app.js", "/assets/app.css", "/assets/favicon.svg"} {
+	for _, p := range []string{
+		"/assets/app.js", "/assets/app.css", "/assets/manifest.json", "/assets/logo-128.png",
+		"/assets/favicon.ico", "/assets/favicon-32.png", "/assets/apple-touch-icon.png",
+		"/assets/icon-192.png", "/assets/icon-512.png", "/assets/icon-maskable-512.png",
+	} {
 		e.anon().do("GET", p, nil).expect(http.StatusOK)
+	}
+	// Every asset the page and the manifest point at must exist.
+	index := string(r.body)
+	for _, p := range []string{"/assets/favicon.ico", "/assets/favicon-32.png", "/assets/apple-touch-icon.png", "/assets/manifest.json"} {
+		if !strings.Contains(index, p) {
+			t.Errorf("index.html does not reference %s", p)
+		}
+	}
+	fav := e.anon().do("GET", "/favicon.ico", nil).expect(http.StatusOK)
+	if !bytes.Equal(fav.body[:4], []byte{0, 0, 1, 0}) {
+		t.Errorf("/favicon.ico is not an ICO file: % x", fav.body[:4])
 	}
 	e.anon().do("GET", "/assets/", nil).expect(http.StatusNotFound)
 	e.anon().do("GET", "/missing", nil).expect(http.StatusNotFound)
