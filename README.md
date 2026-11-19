@@ -168,7 +168,6 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant Site as 网站页面
     participant Inject as inject.js<br/>页面主环境
     participant Content as content.js<br/>扩展隔离环境
