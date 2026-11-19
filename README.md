@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/riba2534/passkey-box/releases/latest"><img src="https://img.shields.io/github/v/release/riba2534/passkey-box?style=for-the-badge&color=0572EC&label=Release" alt="Release" /></a>
   <a href="https://github.com/riba2534/passkey-box/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/riba2534/passkey-box/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI" /></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.26" /></a>
   <a href="https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3"><img src="https://img.shields.io/badge/Chrome-MV3-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Chrome MV3" /></a>
@@ -125,7 +126,11 @@ DEPLOY_HOST=ubuntu@your-host SSH_KEY=~/.ssh/id_ed25519 PUBLIC_URL=https://passke
 
 ### 3. 安装扩展
 
-在 Web 后台的「安装插件」页下载安装包（服务端设置了 `PKB_EXTENSION_ZIP` 时可用），或者自己构建：
+三种方式任选其一获取安装包：
+
+- 从 [GitHub Releases](https://github.com/riba2534/passkey-box/releases/latest) 下载 `passkey-box-extension-<版本>.zip`，可用同名 `.sha256` 文件校验；
+- 在 Web 后台的「安装插件」页下载（服务端设置了 `PKB_EXTENSION_ZIP` 时可用，登录表单里已预填服务器地址）；
+- 自己构建：
 
 ```bash
 make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
