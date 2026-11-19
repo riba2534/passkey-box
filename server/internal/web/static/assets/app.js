@@ -69,7 +69,7 @@
   }
 
   function brandMark() {
-    return h('span', { class: 'brand-mark' }, icon('key'));
+    return h('img', { class: 'brand-mark', src: '/assets/logo-128.png', alt: '', draggable: 'false' });
   }
 
   /* ------------------------------------------------------------------ */

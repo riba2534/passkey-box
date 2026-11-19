@@ -11,8 +11,9 @@ import (
 //go:embed static
 var files embed.FS
 
-// Handler serves index.html at "/" and the files under static/assets at
-// "/assets/". Everything else is 404; the console uses hash routing.
+// Handler serves index.html at "/", the files under static/assets at
+// "/assets/" and /favicon.ico for clients that ignore the <link rel="icon">
+// tags. Everything else is 404; the console uses hash routing.
 func Handler() http.Handler {
 	root, err := fs.Sub(files, "static")
 	if err != nil {
@@ -26,7 +27,10 @@ func Handler() http.Handler {
 			return
 		}
 		p := r.URL.Path
-		if p != "/" && (!strings.HasPrefix(p, "/assets/") || strings.HasSuffix(p, "/")) {
+		if p == "/favicon.ico" {
+			r = r.Clone(r.Context())
+			r.URL.Path = "/assets/favicon.ico"
+		} else if p != "/" && (!strings.HasPrefix(p, "/assets/") || strings.HasSuffix(p, "/")) {
 			http.NotFound(w, r)
 			return
 		}

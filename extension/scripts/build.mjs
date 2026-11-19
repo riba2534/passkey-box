@@ -15,6 +15,7 @@ const common = {
   logLevel: "info",
   legalComments: "none",
   charset: "utf8",
+  loader: { ".png": "dataurl" },
   define: {
     __PKB_DEFAULT_SERVER_URL__: JSON.stringify(process.env.PKB_DEFAULT_SERVER_URL ?? ""),
   },
