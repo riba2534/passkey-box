@@ -72,8 +72,7 @@ func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID
 
 func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
 	var req credentialRequest
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
 	if msg := req.validate(); msg != "" {
@@ -109,8 +108,7 @@ func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, 
 	var req struct {
 		Label *string `json:"label"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
 	if req.Label == nil {

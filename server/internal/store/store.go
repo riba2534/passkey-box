@@ -161,10 +161,6 @@ func NormalizeUsername(username string) (display, key string, ok bool) {
 	return display, strings.ToLower(display), true
 }
 
-func usernameKey(username string) string {
-	return strings.ToLower(strings.TrimSpace(username))
-}
-
 func toMillis(t time.Time) int64 { return t.UnixMilli() }
 
 func fromMillis(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
@@ -211,13 +207,34 @@ const userColumns = `u.id, u.username, u.is_admin, u.created_at,
 
 type rowScanner interface{ Scan(dest ...any) error }
 
-func scanUser(r rowScanner) (User, error) {
+// queryAll runs query and scans every row with scan.
+func queryAll[T any](ctx context.Context, db *sql.DB, scan func(rowScanner) (T, error), query string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// scanUser scans userColumns. Columns selected before them are scanned into
+// leading, in order.
+func scanUser(r rowScanner, leading ...any) (User, error) {
 	var (
 		u        User
 		created  int64
 		lastUsed sql.NullInt64
 	)
-	if err := r.Scan(&u.ID, &u.Username, &u.IsAdmin, &created, &u.CredentialCount, &lastUsed); err != nil {
+	dest := append(leading, &u.ID, &u.Username, &u.IsAdmin, &created, &u.CredentialCount, &lastUsed)
+	if err := r.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
@@ -275,32 +292,21 @@ func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
 
 // ListUsers returns all users ordered by ID.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users u ORDER BY u.id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	users := []User{}
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, u)
-	}
-	return users, rows.Err()
+	return queryAll(ctx, s.db, func(r rowScanner) (User, error) { return scanUser(r) },
+		`SELECT `+userColumns+` FROM users u ORDER BY u.id`)
 }
 
 // Authenticate checks a username (case-insensitive) and password. It returns
 // ErrBadPassword for an unknown user or a wrong password.
 func (s *Store) Authenticate(ctx context.Context, username, password string) (User, error) {
-	key := usernameKey(username)
-	var (
-		id   int64
-		hash string
-	)
-	err := s.db.QueryRowContext(ctx, `SELECT id, password_hash FROM users WHERE username_key = ?`, key).Scan(&id, &hash)
-	if errors.Is(err, sql.ErrNoRows) {
+	_, key, ok := NormalizeUsername(username)
+	if !ok {
+		return User{}, ErrBadPassword
+	}
+	var hash string
+	user, err := scanUser(s.db.QueryRowContext(ctx,
+		`SELECT u.password_hash, `+userColumns+` FROM users u WHERE u.username_key = ?`, key), &hash)
+	if errors.Is(err, ErrNotFound) {
 		return User{}, ErrBadPassword
 	}
 	if err != nil {
@@ -309,7 +315,7 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (Us
 	if !s.passwordMatches(key, password, hash) {
 		return User{}, ErrBadPassword
 	}
-	return s.GetUser(ctx, id)
+	return user, nil
 }
 
 // CheckPassword reports ErrBadPassword when password is not the user's password.
@@ -377,11 +383,10 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, n
 
 // SessionUser returns the user owning an unexpired session.
 func (s *Store) SessionUser(ctx context.Context, token string, now time.Time) (User, error) {
-	var userID, expires int64
-	err := s.db.QueryRowContext(ctx, `SELECT user_id, expires_at FROM sessions WHERE token = ?`, token).Scan(&userID, &expires)
-	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, ErrNotFound
-	}
+	var expires int64
+	user, err := scanUser(s.db.QueryRowContext(ctx,
+		`SELECT s.expires_at, `+userColumns+` FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`, token),
+		&expires)
 	if err != nil {
 		return User{}, err
 	}
@@ -389,7 +394,7 @@ func (s *Store) SessionUser(ctx context.Context, token string, now time.Time) (U
 		_ = s.DeleteSession(ctx, token)
 		return User{}, ErrNotFound
 	}
-	return s.GetUser(ctx, userID)
+	return user, nil
 }
 
 // DeleteSession removes a session; a missing session is not an error.
@@ -430,20 +435,7 @@ func (s *Store) ListCredentials(ctx context.Context, userID int64, rpID string) 
 		args = append(args, strings.ToLower(rpID))
 	}
 	query += ` ORDER BY created_at DESC, seq DESC`
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	creds := []Credential{}
-	for rows.Next() {
-		c, err := scanCredential(rows)
-		if err != nil {
-			return nil, err
-		}
-		creds = append(creds, c)
-	}
-	return creds, rows.Err()
+	return queryAll(ctx, s.db, scanCredential, query, args...)
 }
 
 // GetCredential returns one of the user's credentials.

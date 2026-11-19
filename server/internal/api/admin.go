@@ -47,20 +47,11 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _
 		Password string `json:"password"`
 		IsAdmin  bool   `json:"is_admin"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
-	if !validUsername(w, req.Username) || !validPassword(w, req.Password) {
-		return
-	}
-	user, err := s.opts.Store.CreateUser(r.Context(), req.Username, req.Password, req.IsAdmin, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "username already exists")
-		return
-	}
-	if err != nil {
-		s.internalError(w, err)
+	user, ok := s.createUser(w, r, req.Username, req.Password, req.IsAdmin)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user": newUserView(user)})
@@ -71,8 +62,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, m
 		Password *string `json:"password"`
 		IsAdmin  *bool   `json:"is_admin"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
 	target, ok := s.targetUser(w, r)

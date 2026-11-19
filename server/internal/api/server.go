@@ -224,17 +224,13 @@ func (s *Server) extensionFile() os.FileInfo {
 }
 
 func (s *Server) handleExtensionDownload(w http.ResponseWriter, r *http.Request) {
-	if s.extensionFile() == nil {
-		writeError(w, http.StatusNotFound, "not_found", "extension package not available")
-		return
-	}
+	// An empty ExtensionZip fails to open, so it is reported like a missing file.
 	f, err := os.Open(s.opts.ExtensionZip)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "extension package not available")
-		return
+	var fi os.FileInfo
+	if err == nil {
+		defer f.Close()
+		fi, err = f.Stat()
 	}
-	defer f.Close()
-	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
 		writeError(w, http.StatusNotFound, "not_found", "extension package not available")
 		return
@@ -245,16 +241,15 @@ func (s *Server) handleExtensionDownload(w http.ResponseWriter, r *http.Request)
 	http.ServeContent(w, r, extensionName, fi.ModTime(), f)
 }
 
-// decodeJSON reads a single JSON value from the request body into v.
-func decodeJSON(r *http.Request, v any) error {
+// readJSON reads a single JSON value from the request body into v. On failure
+// it answers 400 and returns false.
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes))
-	if err := dec.Decode(v); err != nil {
-		return err
+	if dec.Decode(v) != nil || dec.More() {
+		badRequest(w, "invalid JSON body")
+		return false
 	}
-	if dec.More() {
-		return errors.New("unexpected data after JSON value")
-	}
-	return nil
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

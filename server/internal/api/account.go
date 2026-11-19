@@ -30,10 +30,27 @@ func validPassword(w http.ResponseWriter, password string) bool {
 	return true
 }
 
+// createUser validates the account fields and creates the user. It writes the
+// error response and returns false on failure.
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request, username, password string, isAdmin bool) (store.User, bool) {
+	if !validUsername(w, username) || !validPassword(w, password) {
+		return store.User{}, false
+	}
+	user, err := s.opts.Store.CreateUser(r.Context(), username, password, isAdmin, s.opts.Now())
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", "username already exists")
+		return store.User{}, false
+	}
+	if err != nil {
+		s.internalError(w, err)
+		return store.User{}, false
+	}
+	return user, true
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
 	if !validUsername(w, req.Username) || !validPassword(w, req.Password) {
@@ -72,20 +89,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req loginRequest
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
-	if !validUsername(w, req.Username) || !validPassword(w, req.Password) {
-		return
-	}
-	user, err := s.opts.Store.CreateUser(r.Context(), req.Username, req.Password, false, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "username already exists")
-		return
-	}
-	if err != nil {
-		s.internalError(w, err)
+	user, ok := s.createUser(w, r, req.Username, req.Password, false)
+	if !ok {
 		return
 	}
 	if err := s.startSession(w, r, user); err != nil {
@@ -104,8 +112,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, us
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		badRequest(w, "invalid JSON body")
+	if !readJSON(w, r, &req) {
 		return
 	}
 	if !validPassword(w, req.NewPassword) {
