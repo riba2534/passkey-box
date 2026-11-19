@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -82,6 +83,11 @@ func TestCreateCredentialValidation(t *testing.T) {
 		"bad user_handle":     func(b map[string]any) { b["user_handle"] = "not base64!" },
 		"bad public_key":      func(b map[string]any) { b["public_key"] = "%%%" },
 		"wrong type":          func(b map[string]any) { b["rp_name"] = 42 },
+		"javascript origin":   func(b map[string]any) { b["origin"] = "javascript:alert(1)" },
+		"data origin":         func(b map[string]any) { b["origin"] = "data:text/html,hi" },
+		"ftp origin":          func(b map[string]any) { b["origin"] = "ftp://example.com" },
+		"relative origin":     func(b map[string]any) { b["origin"] = "example.com" },
+		"hostless origin":     func(b map[string]any) { b["origin"] = "https://" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -93,6 +99,19 @@ func TestCreateCredentialValidation(t *testing.T) {
 	c.do("POST", "/api/v1/credentials", "{").expectError(http.StatusBadRequest, "invalid_request")
 	if n := len(c.do("GET", "/api/v1/credentials", nil).credentials()); n != 0 {
 		t.Fatalf("invalid requests stored %d credentials", n)
+	}
+}
+
+func TestCreateCredentialAcceptsHTTPOrigins(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	for i, origin := range []string{"", "https://example.com", "http://localhost:18421", "HTTPS://Example.COM"} {
+		body := newCred(fmt.Sprintf("b3JpZ%d", i), "example.com", fmt.Sprintf("dQ%d", i))
+		body["origin"] = origin
+		if got := c.do("POST", "/api/v1/credentials", body).expect(http.StatusCreated).credential(); got.Origin != origin {
+			t.Errorf("origin = %q, want %q", got.Origin, origin)
+		}
 	}
 }
 
