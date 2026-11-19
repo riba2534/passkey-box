@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Passkey Box E2E 测试站点</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+      form { display: grid; gap: 0.75rem; }
+      #result { font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>Passkey Box E2E 测试站点</h1>
+    <!--
+      Element contract used by e2e/support/rp.ts:
+        #username            username input, autocomplete="username webauthn"
+        #exclude             checkbox: send excludeCredentials on registration
+        #register            register a passkey for #username
+        #login               usernameless login (allowCredentials = [])
+        #login-username      login with allowCredentials = credentials of #username
+        #result              outcome text, see client.js
+      ?conditional=1 starts a mediation:"conditional" login on page load.
+    -->
+    <form id="form" autocomplete="on">
+      <label>用户名 <input id="username" name="username" autocomplete="username webauthn" /></label>
+      <label><input id="exclude" type="checkbox" /> 注册时带 excludeCredentials</label>
+      <div>
+        <button id="register" type="button">注册通行密钥</button>
+        <button id="login" type="button">通行密钥登录</button>
+        <button id="login-username" type="button">按用户名登录</button>
+      </div>
+    </form>
+    <p>结果：<output id="result">idle</output></p>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>
