@@ -198,6 +198,11 @@
     return (overrides && overrides[err.code]) || ERROR_TEXT[err.code] || '操作失败，请重试';
   }
 
+  // toastError reports a failed request; a 401 was already handled by api().
+  function toastError(err, overrides) {
+    if (err.status !== 401) toast(errText(err, overrides), 'error');
+  }
+
   async function api(method, path, body) {
     let res;
     try {
@@ -336,6 +341,20 @@
     });
   }
 
+  // confirmDelete asks for confirmation, then sends DELETE. It resolves true
+  // once the item is gone, including when it had already been deleted.
+  async function confirmDelete(dialog, path, errOverrides) {
+    if (!(await confirmDialog({ ...dialog, danger: true }))) return false;
+    try {
+      await api('DELETE', path);
+    } catch (err) {
+      if (err.code === 'not_found') return true;
+      toastError(err, errOverrides);
+      return false;
+    }
+    return true;
+  }
+
   // formDialog shows a form; onSubmit(values) returns an error message or "".
   function formDialog({ title, intro, fields, submitText, onSubmit }) {
     openModal(title, (close) => {
@@ -368,7 +387,7 @@
             return h('div', { class: 'form-row' }, h('label', { class: 'checkbox', for: id }, inputs[f.name], f.label));
           }
           inputs[f.name] = h('input', { class: 'input', id, type: f.type || 'text', autocomplete: f.autocomplete || 'off', placeholder: f.placeholder || '' });
-          return h('div', { class: 'form-row' }, h('label', { for: id }, f.label), inputs[f.name]);
+          return formRow(f.label, inputs[f.name]);
         }),
         error),
       h('div', { class: 'modal-foot' },
@@ -382,8 +401,8 @@
   /* Routing                                                             */
   /* ------------------------------------------------------------------ */
 
-  const PAGES = ['passkeys', 'users', 'install', 'settings'];
   const PAGE_TITLES = { passkeys: '我的通行密钥', users: '用户管理', install: '安装插件', settings: '账户设置' };
+  const PAGES = Object.keys(PAGE_TITLES);
 
   function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
@@ -454,8 +473,8 @@
       e.preventDefault();
       error.textContent = '';
       const u = username.value.trim();
-      if (!u) return void (error.textContent = '请输入用户名');
-      if ([...u].length > 64) return void (error.textContent = '用户名不能超过 64 个字符');
+      const invalid = usernameError(u);
+      if (invalid) return void (error.textContent = invalid);
       if (!password.value) return void (error.textContent = '请输入密码');
       if (register && password.value !== confirm.value) return void (error.textContent = '两次输入的密码不一致');
       submit.disabled = true;
@@ -480,9 +499,9 @@
       h('h1', null, register ? '注册 Passkey Box' : '登录 Passkey Box'),
       h('p', { class: 'auth-sub' }, register ? '创建账户后即可在插件中使用你的通行密钥' : '管理保存在服务器上的通行密钥'),
       h('form', { onsubmit: onSubmit, novalidate: true },
-        h('div', { class: 'form-row' }, h('label', { for: 'login-username' }, '用户名'), username),
-        h('div', { class: 'form-row' }, h('label', { for: 'login-password' }, '密码'), password),
-        register ? h('div', { class: 'form-row' }, h('label', { for: 'login-confirm' }, '确认密码'), confirm) : null,
+        formRow('用户名', username),
+        formRow('密码', password),
+        register ? formRow('确认密码', confirm) : null,
         error,
         submit),
       state.info.allow_register
@@ -557,7 +576,7 @@
           userAvatar(me.username, 'sm'),
           h('div', { class: 'account-meta' },
             h('div', { class: 'account-name', title: me.username }, me.username),
-            h('div', { class: 'account-role' }, me.is_admin ? '管理员' : '普通用户')),
+            h('div', { class: 'account-role' }, roleText(me))),
           iconButton('logout', '退出登录', logout))));
   }
 
@@ -596,6 +615,30 @@
         h('div', { class: 'field-label' }, label),
         h('div', { class: 'field-value' + (o.mono ? ' mono' : '') + (empty ? ' muted' : '') }, empty ? (o.placeholder || '—') : value)),
       o.actions && o.actions.length ? h('div', { class: 'field-actions' }, o.actions) : null);
+  }
+
+  function formRow(label, input) {
+    return h('div', { class: 'form-row' }, h('label', { for: input.id }, label), input);
+  }
+
+  // usernameError checks a trimmed username against the docs/API.md rule.
+  function usernameError(username) {
+    if (!username) return '请输入用户名';
+    if ([...username].length > 64) return '用户名不能超过 64 个字符';
+    return '';
+  }
+
+  function roleText(u) {
+    return u.is_admin ? '管理员' : '普通用户';
+  }
+
+  // lastUsedShort is "最近使用 3 天前" or "从未使用", for list rows.
+  function lastUsedShort(t) {
+    return t ? '最近使用 ' + fmtRelative(t) : '从未使用';
+  }
+
+  function lastUsedField(t) {
+    return field('最近使用', t ? `${fmtRelative(t)}（${fmtDateTime(t)}）` : '', { placeholder: '从未使用' });
   }
 
   function copyAction(text, what) {
@@ -745,7 +788,7 @@
         renderShell();
       } catch (err) {
         saveBtn.disabled = false;
-        if (err.status !== 401) toast(errText(err), 'error');
+        toastError(err);
       }
     };
     labelInput.addEventListener('input', () => {
@@ -757,19 +800,12 @@
     saveBtn.addEventListener('click', saveLabel);
 
     const remove = async () => {
-      const ok = await confirmDialog({
+      const deleted = await confirmDelete({
         title: '删除通行密钥？',
         message: `删除后将无法再用它登录 ${c.rp_id} 上的账号“${credAccount(c)}”。此操作无法撤销。`,
         confirmText: '删除',
-        danger: true,
-      });
-      if (!ok) return;
-      try {
-        await api('DELETE', `/credentials/${encodeURIComponent(c.id)}`);
-      } catch (err) {
-        if (err.status === 401) return;
-        if (err.code !== 'not_found') return void toast(errText(err), 'error');
-      }
+      }, `/credentials/${encodeURIComponent(c.id)}`);
+      if (!deleted) return;
       state.creds = state.creds.filter((x) => x.id !== c.id);
       state.users = null;
       state.userCreds = {};
@@ -796,7 +832,7 @@
       h('h3', { class: 'section-title' }, '使用情况'),
       h('div', { class: 'card' },
         field('创建时间', fmtDateTime(c.created_at)),
-        field('最近使用', c.last_used_at ? `${fmtRelative(c.last_used_at)}（${fmtDateTime(c.last_used_at)}）` : '', { placeholder: '从未使用' }),
+        lastUsedField(c.last_used_at),
         field('使用次数', `${c.use_count} 次`)),
       h('h3', { class: 'section-title' }, '技术信息'),
       h('div', { class: 'card' },
@@ -813,7 +849,7 @@
   /* ------------------------------------------------------------------ */
 
   function userSummary(u) {
-    return `${u.credential_count} 个通行密钥 · ${u.last_used_at ? '最近使用 ' + fmtRelative(u.last_used_at) : '从未使用'}`;
+    return `${u.credential_count} 个通行密钥 · ${lastUsedShort(u.last_used_at)}`;
   }
 
   function renderUsersPage() {
@@ -881,12 +917,6 @@
       h('div', { class: 'item-meta' }, '创建于 ' + fmtDate(u.created_at))))));
   }
 
-  async function reloadUsers(userId) {
-    const loads = [loadUsers()];
-    if (userId != null) loads.push(loadUserCreds(String(userId)));
-    await Promise.all(loads);
-  }
-
   function createUserDialog() {
     formDialog({
       title: '新建用户',
@@ -899,8 +929,8 @@
       ],
       onSubmit: async (v) => {
         const username = v.username.trim();
-        if (!username) return '请输入用户名';
-        if ([...username].length > 64) return '用户名不能超过 64 个字符';
+        const invalid = usernameError(username);
+        if (invalid) return invalid;
         if (!v.password) return '请输入密码';
         try {
           const data = await api('POST', '/admin/users', { username, password: v.password, is_admin: v.is_admin });
@@ -954,24 +984,17 @@
       toast(makeAdmin ? '已设为管理员' : '已取消管理员');
       renderShell();
     } catch (err) {
-      if (err.status !== 401) toast(errText(err, { invalid_request: '不能取消自己的管理员身份' }), 'error');
+      toastError(err, { invalid_request: '不能取消自己的管理员身份' });
     }
   }
 
   async function deleteUser(u) {
-    const ok = await confirmDialog({
+    const deleted = await confirmDelete({
       title: `删除用户 ${u.username}？`,
       message: `该用户的 ${u.credential_count} 个通行密钥和所有登录会话将被一并删除。此操作无法撤销。`,
       confirmText: '删除用户',
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await api('DELETE', `/admin/users/${u.id}`);
-    } catch (err) {
-      if (err.status === 401) return;
-      if (err.code !== 'not_found') return void toast(errText(err, { invalid_request: '不能删除自己' }), 'error');
-    }
+    }, `/admin/users/${u.id}`, { invalid_request: '不能删除自己' });
+    if (!deleted) return;
     delete state.userCreds[String(u.id)];
     try {
       await loadUsers();
@@ -983,24 +1006,17 @@
   }
 
   async function deleteUserCred(u, c) {
-    const ok = await confirmDialog({
+    const deleted = await confirmDelete({
       title: '删除通行密钥？',
       message: `将删除 ${u.username} 在 ${c.rp_id} 上的通行密钥“${credAccount(c)}”。此操作无法撤销。`,
       confirmText: '删除',
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await api('DELETE', `/admin/users/${u.id}/credentials/${encodeURIComponent(c.id)}`);
-    } catch (err) {
-      if (err.status === 401) return;
-      if (err.code !== 'not_found') return void toast(errText(err), 'error');
-    }
+    }, `/admin/users/${u.id}/credentials/${encodeURIComponent(c.id)}`);
+    if (!deleted) return;
     if (u.id === state.me.id) state.creds = null;
     try {
-      await reloadUsers(u.id);
+      await Promise.all([loadUsers(), loadUserCreds(String(u.id))]);
     } catch (err) {
-      if (err.status !== 401) toast(errText(err), 'error');
+      toastError(err);
     }
     toast('通行密钥已删除');
     renderShell();
@@ -1021,7 +1037,7 @@
         h('div', { class: 'item-main' },
           h('div', { class: 'item-title' }, h('span', { class: 'text' }, credTitle(c)), c.label ? h('span', { class: 'badge gray' }, c.label) : null),
           h('div', { class: 'item-sub' }, credAccount(c)),
-          h('div', { class: 'item-meta' }, `创建于 ${fmtDate(c.created_at)} · ${c.last_used_at ? '最近使用 ' + fmtRelative(c.last_used_at) : '从未使用'} · ${c.use_count} 次`)),
+          h('div', { class: 'item-meta' }, `创建于 ${fmtDate(c.created_at)} · ${lastUsedShort(c.last_used_at)} · ${c.use_count} 次`)),
         iconButton('trash', '删除通行密钥', () => deleteUserCred(u, c), 'danger'))));
     }
 
@@ -1032,7 +1048,7 @@
         h('div', { class: 'detail-head-main' },
           h('h2', { class: 'detail-title' }, u.username),
           h('div', { class: 'detail-subtitle' },
-            u.is_admin ? h('span', { class: 'badge' }, '管理员') : h('span', { class: 'badge gray' }, '普通用户'),
+            h('span', { class: u.is_admin ? 'badge' : 'badge gray' }, roleText(u)),
             isMe ? h('span', null, '当前登录的账户') : null))),
       h('div', { class: 'detail-actions', style: 'margin:-8px 0 20px' },
         h('button', { type: 'button', class: 'btn btn-sm', onclick: () => resetPasswordDialog(u) }, icon('lock'), '重置密码'),
@@ -1052,9 +1068,9 @@
         }, icon('trash'), '删除用户')),
       h('div', { class: 'card' },
         field('用户名', u.username, { actions: [copyAction(u.username, '用户名')] }),
-        field('角色', u.is_admin ? '管理员' : '普通用户'),
+        field('角色', roleText(u)),
         field('通行密钥', `${u.credential_count} 个`),
-        field('最近使用', u.last_used_at ? `${fmtRelative(u.last_used_at)}（${fmtDateTime(u.last_used_at)}）` : '', { placeholder: '从未使用' }),
+        lastUsedField(u.last_used_at),
         field('创建时间', fmtDateTime(u.created_at))),
       h('h3', { class: 'section-title' }, `通行密钥${creds ? ' · ' + creds.length : ''}`),
       credCard);
@@ -1134,15 +1150,15 @@
           h('h3', { class: 'section-title' }, '账户'),
           h('div', { class: 'card' },
             field('用户名', me.username),
-            field('角色', me.is_admin ? '管理员' : '普通用户'),
+            field('角色', roleText(me)),
             field('通行密钥', `${me.credential_count} 个`),
             field('创建时间', fmtDateTime(me.created_at))),
           h('h3', { class: 'section-title' }, '修改密码'),
           h('form', { class: 'card form-card', onsubmit: onSubmit, novalidate: true },
             h('input', { type: 'text', autocomplete: 'username', value: me.username, hidden: true, readonly: true }),
-            h('div', { class: 'form-row' }, h('label', { for: 'pw-old' }, '当前密码'), old),
-            h('div', { class: 'form-row' }, h('label', { for: 'pw-new' }, '新密码'), next),
-            h('div', { class: 'form-row' }, h('label', { for: 'pw-confirm' }, '确认新密码'), confirm),
+            formRow('当前密码', old),
+            formRow('新密码', next),
+            formRow('确认新密码', confirm),
             error,
             h('div', { class: 'form-actions' }, submit)))));
   }
@@ -1152,16 +1168,11 @@
   /* ------------------------------------------------------------------ */
 
   async function boot() {
-    try {
-      state.info = await api('GET', '/info');
-    } catch {
-      // Keep defaults; the login form still works.
-    }
-    try {
-      await refreshMe();
-    } catch {
-      state.me = null;
-    }
+    await Promise.all([
+      // On failure keep the default info; the login form still works.
+      api('GET', '/info').then((info) => { state.info = info; }, () => {}),
+      refreshMe().catch(() => { state.me = null; }),
+    ]);
     window.addEventListener('hashchange', onRoute);
     onRoute();
   }

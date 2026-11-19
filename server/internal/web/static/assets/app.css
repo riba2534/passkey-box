@@ -331,7 +331,6 @@ svg { display: block; }
   margin-bottom: 20px;
   overflow: hidden;
 }
-.card-body { padding: 16px; }
 .field {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px;
