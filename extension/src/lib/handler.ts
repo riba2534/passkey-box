@@ -2,6 +2,7 @@
 
 import { describeError, type Credential, type NewCredential } from "./api";
 import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlgorithm } from "./authenticator";
+import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
 import { decideGet, filterByAllowList, hasExcludedCredential, selectAlgorithm } from "./decision";
 import { requestedRpId, type BackgroundRequest, type BackgroundResponse, type CandidateSummary } from "./protocol";
@@ -29,6 +30,8 @@ function summarize(c: Credential): CandidateSummary {
 }
 
 export async function handleRequest(req: BackgroundRequest, deps: HandlerDeps): Promise<BackgroundResponse> {
+  // Unconfigured, or an opaque/non-http(s) origin (e.g. sandboxed iframe): not ours to handle.
+  if (!isHttpOrigin(req.caller.origin)) return { action: "fallback" };
   const config = await deps.loadConfig();
   if (!config) return { action: "fallback" };
   const rpId = effectiveRpId(requestedRpId(req.options), req.caller.hostname);
@@ -49,6 +52,9 @@ async function handleGet(
   try {
     all = await store.listCredentials(rpId);
   } catch (err) {
+    // A conditional (autofill) request starts on page load without user action: stay silent.
+    // Once the user picked an account (credentialId set), report the failure.
+    if (req.mediation === "conditional" && req.credentialId === undefined) return { action: "pending" };
     return { action: "error", message: describeError(err) };
   }
   const candidates = filterByAllowList(all, req.options.allowCredentials.map((d) => d.id));
