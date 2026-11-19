@@ -1,0 +1,23 @@
+{
+  "name": "passkey-box-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for Passkey Box (extension + server) against a local WebAuthn test RP",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "rp": "node rp/server.ts",
+    "test": "playwright test",
+    "test:harness": "playwright test --project=harness",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^14.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}
