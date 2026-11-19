@@ -21,6 +21,8 @@ export default defineConfig({
   use: {
     channel: 'chromium',
     headless: true,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
     { name: 'rp-setup', testMatch: /setup\/rp\.setup\.ts$/, teardown: 'rp-teardown' },
