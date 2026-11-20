@@ -16,8 +16,6 @@ import {
   createAssertion,
   createRegistration,
   ecdsaRawToDer,
-  FLAGS_ASSERT,
-  FLAGS_REGISTER,
   generateKey,
   sha256,
   signWithPkcs8,
@@ -29,11 +27,6 @@ import { hex } from "./fixtures";
 const fromHex = (s: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(s, "hex"));
 
 describe("constants", () => {
-  it("flags match CONTRACT 4.5", () => {
-    expect(FLAGS_REGISTER).toBe(0x5d);
-    expect(FLAGS_ASSERT).toBe(0x1d);
-  });
-
   it("AAGUID bytes", () => {
     expect(hex(aaguidBytes())).toBe(AAGUID.replace(/-/g, ""));
     expect(() => aaguidBytes("nope")).toThrow(TypeError);
@@ -116,7 +109,7 @@ describe("authenticatorData / attestationObject", () => {
     const rpIdHash = await sha256(utf8("example.com"));
     const credId = new Uint8Array(32).fill(7);
     const cose = coseEc2PublicKey(new Uint8Array(32), new Uint8Array(32));
-    const ad = authenticatorData(rpIdHash, FLAGS_REGISTER, 0, attestedCredentialData(aaguidBytes(), credId, cose));
+    const ad = authenticatorData(rpIdHash, 0x5d, 0, attestedCredentialData(aaguidBytes(), credId, cose));
     const parsed = parseAuthenticatorData(ad);
     expect(hex(parsed.rpIdHash)).toBe(hex(rpIdHash));
     expect(parsed.flags).toMatchObject({ up: true, uv: true, be: true, bs: true, at: true, ed: false });
@@ -127,7 +120,7 @@ describe("authenticatorData / attestationObject", () => {
   });
 
   it("assertion authData is exactly 37 bytes", async () => {
-    const ad = authenticatorData(await sha256(utf8("a")), FLAGS_ASSERT, 0);
+    const ad = authenticatorData(await sha256(utf8("a")), 0x1d, 0);
     expect(ad.length).toBe(37);
     expect(ad[32]).toBe(0x1d);
     expect(() => authenticatorData(new Uint8Array(31), 0, 0)).toThrow(TypeError);
@@ -166,7 +159,7 @@ describe.each<[string, CoseAlgorithm]>([
   const origin = "http://localhost:18411";
 
   async function register(challenge: string, extra: { credProps?: boolean } = {}) {
-    const reg = await createRegistration({ rpId, challenge, origin, crossOrigin: false, alg, ...extra });
+    const reg = await createRegistration({ userVerified: true, rpId, challenge, origin, crossOrigin: false, alg, ...extra });
     const verification = await verifyRegistrationResponse({
       response: reg.response,
       expectedChallenge: challenge,
@@ -203,6 +196,7 @@ describe.each<[string, CoseAlgorithm]>([
     const challenge = bytesToBase64url(crypto.getRandomValues(new Uint8Array(32)));
     const userHandle = bytesToBase64url(utf8("user-1"));
     const assertion = await createAssertion({
+      userVerified: true,
       rpId,
       challenge,
       origin,
@@ -228,6 +222,7 @@ describe.each<[string, CoseAlgorithm]>([
   it("cross-origin iframe assertions carry topOrigin", async () => {
     const { reg, verification } = await register("Y2g");
     const assertion = await createAssertion({
+      userVerified: true,
       rpId,
       challenge: "Y2hhbGxlbmdl",
       origin,
@@ -254,6 +249,7 @@ describe.each<[string, CoseAlgorithm]>([
   it("a tampered signature fails verification", async () => {
     const { reg, verification } = await register("dGFtcGVy");
     const assertion = await createAssertion({
+      userVerified: true,
       rpId,
       challenge: "dGFtcGVy",
       origin,

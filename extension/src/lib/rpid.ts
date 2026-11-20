@@ -1,5 +1,7 @@
 // Relying Party ID helpers.
 
+import { getDomain } from "tldts";
+
 /** Effective rpId: the requested one, or the page hostname when absent. */
 export function effectiveRpId(requested: string | null | undefined, hostname: string): string {
   return requested === undefined || requested === null ? hostname : requested;
@@ -21,5 +23,5 @@ export function hostMatchesRpId(hostname: string, rpId: string): boolean {
   const rp = rpId.toLowerCase();
   if (host === rp) return true;
   if (isIpAddress(host) || !rp.includes(".")) return false;
-  return host.endsWith("." + rp);
+  return host.endsWith("." + rp) && getDomain(rp, { allowPrivateDomains: true }) !== null;
 }

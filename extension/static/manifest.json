@@ -1,32 +1,45 @@
 {
   "manifest_version": 3,
   "name": "Passkey Box",
-  "version": "0.1.0",
-  "description": "使用 Passkey Box 服务器上保存的通行密钥自动注册和登录网站。",
+  "version": "0.2.0",
+  "description": "使用 Passkey Box 保存和同步通行密钥，并在通过设备验证后注册和登录网站。",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["inject.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "inject.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true,
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true
@@ -42,5 +55,6 @@
       "128": "icons/icon-128.png"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjmZcjxYdpvies+2QcxtxBiJ5eu7rFof3eRDoxAY2JLRzt5cr+Zt0ZvMB02YRnuCJ4w9Wu94PxP1zf2O91SbIB2aB+uFE+2eKC5MTyf0OovUWwAsXsuc9O+JhWNp8L7+E86soVcjgjeLbS4RaMQk3vmam8OefC4UDAx9puosZZhrIjbX9EfXbs48s8DpKiOORP6n5z9rsN6fH5G0tSfg+pcD5aJxf9KpcV/Tm9ocJBEfc2wNQl4BCgyKQ5gcKm4jiD5FJxDOhCOgoYAlQORdArPNzEdo4JcWIPgyK9U5uFe+3x4HfvXse7E3Jn/VSPdChS4KDZCt4qUIbnfstx+RYgQIDAQAB"
 }
