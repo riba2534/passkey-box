@@ -32,7 +32,11 @@ test('required registration and authentication await verification on the extensi
   expect((await rpApi.user('alice')).credentials).toEqual([]);
 
   await extension.addDeviceAuthenticator(registration);
-  await registration.locator('#verify').click();
+  const verify = registration.locator('#verify');
+  await verify.evaluate((control) => (control as HTMLButtonElement).click());
+  await expect(registration.locator('#status')).toHaveAttribute('data-state', 'ready');
+  await expect(rp.result).toHaveText('pending:register');
+  await verify.click();
   await rp.expectResult('registered:alice');
   const [saved] = await pkb.listCredentials(stack.users.a);
   expect(saved?.user_name).toBe('alice');
@@ -82,22 +86,24 @@ test('canceling required login leaves local passkey usage untouched', async ({ e
   expect((await pkb.listCredentials(stack.users.a))[0]?.use_count).toBe(0);
 });
 
-test('an extension device assertion without verified-user evidence does not authorize login', async ({
-  extension, stack, rp, pkb,
-}) => {
-  await extension.configure(stack.users.a);
-  await rp.goto({ requireUV: true });
-  await rp.registerOk('alice');
-  const before = await rpApi.user('alice');
+for (const flag of ['UP', 'UV'] as const) {
+  test(`an extension device assertion without the ${flag} flag does not authorize login`, async ({
+    extension, stack, rp, pkb,
+  }) => {
+    await extension.configure(stack.users.a);
+    await rp.goto({ requireUV: true });
+    await rp.registerOk('alice');
+    const before = await rpApi.user('alice');
 
-  extension.autoVerify = false;
-  await rp.login();
-  const approval = await extension.waitForVerification();
-  const device = await extension.addDeviceAuthenticator(approval);
-  await device.clearResponseFlag('UV');
-  await approval.locator('#verify').click();
+    extension.autoVerify = false;
+    await rp.login();
+    const approval = await extension.waitForVerification();
+    const device = await extension.addDeviceAuthenticator(approval);
+    await device.clearResponseFlag(flag);
+    await approval.locator('#verify').click();
 
-  await rp.expectResult('error:NotAllowedError');
-  expect(await rpApi.user('alice')).toEqual(before);
-  expect((await pkb.listCredentials(stack.users.a))[0]?.use_count).toBe(0);
-});
+    await rp.expectResult('error:NotAllowedError');
+    expect(await rpApi.user('alice')).toEqual(before);
+    expect((await pkb.listCredentials(stack.users.a))[0]?.use_count).toBe(0);
+  });
+}
