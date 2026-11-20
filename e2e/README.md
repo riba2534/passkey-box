@@ -16,7 +16,7 @@ npx playwright test --project=extension       # 只跑扩展用例（会自动�
 npx playwright test --list                    # 列出用例
 ```
 
-`--headed` 可以看到浏览器窗口。
+`--headed` 可以看到浏览器窗口。设置 `PKB_E2E_CHROMIUM` 可用指定的 Chromium 可执行文件替代 Playwright 自带版本，测试仍会使用独立的临时 Profile。
 
 ## 结构
 

@@ -33,6 +33,7 @@ test('required registration and authentication await verification on the extensi
 
   await extension.addDeviceAuthenticator(registration);
   const verify = registration.locator('#verify');
+  await expect(registration.locator('#status')).toHaveAttribute('data-state', 'ready');
   await verify.evaluate((control) => (control as HTMLButtonElement).click());
   await expect(registration.locator('#status')).toHaveAttribute('data-state', 'ready');
   await expect(rp.result).toHaveText('pending:register');

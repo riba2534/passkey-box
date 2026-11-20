@@ -3,6 +3,7 @@
 // a reset test RP and empty credential lists for both test accounts.
 
 import { chromium, expect, type BrowserContext, type Locator, type Page, test as base, type Worker } from '@playwright/test';
+import { CHROMIUM_EXECUTABLE_PATH } from './config.ts';
 import { type Account, PkbApi } from './pkb-api.ts';
 import { RpPage, rpApi } from './rp.ts';
 import { readStackState, type StackState } from './stack.ts';
@@ -196,6 +197,7 @@ export const test = base.extend<Fixtures>({
   context: async ({ stack, headless }, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
+      executablePath: CHROMIUM_EXECUTABLE_PATH,
       headless,
       args: [`--disable-extensions-except=${stack.extensionDist}`, `--load-extension=${stack.extensionDist}`],
     });
