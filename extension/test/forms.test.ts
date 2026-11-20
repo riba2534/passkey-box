@@ -62,8 +62,8 @@ describe("settingsPanel", () => {
     const conditional = panel.querySelector<HTMLInputElement>('[data-setting="conditionalAutoLogin"]')!;
     expect(single.checked).toBe(true);
     expect(conditional.checked).toBe(false);
-    expect(panel.textContent).toContain("只匹配到一个时自动登录");
-    expect(panel.textContent).toContain("页面打开时自动登录");
+    expect(panel.textContent).toContain("只有一个账号时跳过选择");
+    expect(panel.textContent).toContain("响应页面的自动填充请求");
     single.checked = false;
     single.dispatchEvent(new Event("change"));
     expect(onChange).toHaveBeenLastCalledWith({ autoLoginSingle: false, conditionalAutoLogin: false });

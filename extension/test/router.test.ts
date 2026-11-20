@@ -83,7 +83,7 @@ describe("content router", () => {
     const { router, sent } = setup([{ action: "pending" }]);
     await router.handle(getRequest("r1", "conditional"));
     expect(sent).toEqual([
-      { type: "pkb:get", caller, options: { challenge: "AQ", allowCredentials: [] }, mediation: "conditional" },
+      { type: "pkb:get", requestId: "r1", caller, options: { challenge: "AQ", allowCredentials: [] }, mediation: "conditional" },
     ]);
   });
 
