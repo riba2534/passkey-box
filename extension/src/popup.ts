@@ -260,6 +260,7 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
         state.settings = next;
         await saveSettings(next);
       }),
+      button(document, "设备验证设置", "secondary", () => void chrome.tabs.create({ url: chrome.runtime.getURL("device.html") })),
     );
   }
 }
