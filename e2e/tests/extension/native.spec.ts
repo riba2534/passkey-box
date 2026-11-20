@@ -1,11 +1,11 @@
-// "不要唤起系统的指纹认证": a CDP virtual authenticator stands in for the platform
-// authenticator. Anything that reaches Chrome's native WebAuthn implementation lands in it.
+// This separately attached native authenticator covers only the website target.
+// It verifies that extension-owned verification never consumes a website's native credentials.
 
 import { expect, test } from '../../support/extension-fixtures.ts';
 import { rpApi } from '../../support/rp.ts';
 import { base64ToBase64url } from '../../support/virtual-authenticator.ts';
 
-test('a configured extension never calls the native implementation', async ({
+test('a configured extension uses native verification away from the website target', async ({
   extension,
   stack,
   authenticator,

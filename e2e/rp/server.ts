@@ -37,9 +37,10 @@ type User = {
   credentials: StoredCredential[];
 };
 
-type Flow =
-  | { kind: 'register'; challenge: string; user: User }
-  | { kind: 'login'; challenge: string; user: User | null };
+type Flow = (
+  | { kind: 'register'; user: User }
+  | { kind: 'login'; user: User | null }
+) & { challenge: string; requireUV: boolean };
 
 const usersByName = new Map<string, User>();
 const flows = new Map<string, Flow>();
@@ -94,7 +95,8 @@ function newFlow(flow: Flow): string {
   return id;
 }
 
-async function registerOptions(body: { username?: unknown; exclude?: unknown }) {
+async function registerOptions(body: { username?: unknown; exclude?: unknown; requireUV?: unknown }) {
+  const requireUV = body.requireUV === true;
   const user = getOrCreateUser(normalizeName(body.username));
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
@@ -104,13 +106,13 @@ async function registerOptions(body: { username?: unknown; exclude?: unknown }) 
     userID: Buffer.from(user.handle, 'base64url'),
     attestationType: 'none',
     supportedAlgorithmIDs: [-7, -257],
-    authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+    authenticatorSelection: { residentKey: 'required', userVerification: requireUV ? 'required' : 'preferred' },
     excludeCredentials:
       body.exclude === true
         ? user.credentials.map((c) => ({ id: c.id, transports: c.transports }))
         : [],
   });
-  const flowId = newFlow({ kind: 'register', challenge: options.challenge, user });
+  const flowId = newFlow({ kind: 'register', challenge: options.challenge, user, requireUV });
   return { flowId, options };
 }
 
@@ -123,7 +125,7 @@ async function registerVerify(body: { flowId?: unknown; response?: unknown }) {
       expectedChallenge: flow.challenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: flow.requireUV,
     });
   } catch (err) {
     console.error('[rp] registration verification threw:', err);
@@ -136,7 +138,8 @@ async function registerVerify(body: { flowId?: unknown; response?: unknown }) {
   return { username: flow.user.name, credentialId: credential.id };
 }
 
-async function loginOptions(body: { username?: unknown }) {
+async function loginOptions(body: { username?: unknown; requireUV?: unknown }) {
+  const requireUV = body.requireUV === true;
   let user: User | null = null;
   if (body.username !== undefined) {
     user = usersByName.get(normalizeName(body.username).toLowerCase()) ?? null;
@@ -145,10 +148,10 @@ async function loginOptions(body: { username?: unknown }) {
   }
   const options = await generateAuthenticationOptions({
     rpID: RP_ID,
-    userVerification: 'preferred',
+    userVerification: requireUV ? 'required' : 'preferred',
     allowCredentials: user ? user.credentials.map((c) => ({ id: c.id, transports: c.transports })) : [],
   });
-  const flowId = newFlow({ kind: 'login', challenge: options.challenge, user });
+  const flowId = newFlow({ kind: 'login', challenge: options.challenge, user, requireUV });
   return { flowId, options };
 }
 
@@ -167,7 +170,7 @@ async function loginVerify(body: { flowId?: unknown; response?: unknown }) {
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
       credential: found.credential,
-      requireUserVerification: false,
+      requireUserVerification: flow.requireUV,
     });
   } catch (err) {
     console.error('[rp] authentication verification threw:', err);

@@ -29,16 +29,17 @@ npx playwright test --list                    # 列出用例
 | `tests/extension/` | 扩展 + 服务端用例 |
 | `support/` | 端口与路径、进程管理、服务端 API 客户端、RP 页面对象、扩展 fixture、虚拟认证器 |
 
-扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置；用例开始前重置 RP，并清空两个测试账号在服务端的凭据。
+扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置。配置后，fixture 在扩展自己的设备页面通过 CDP 虚拟平台认证器注册本地密钥。测试可选择自动确认、手动取消或模拟无 UV 的设备响应。网站测试页的虚拟认证器独立运行，供原生回退用例使用。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。
 
 ## RP 页面约定
 
 - `#username`（`autocomplete="username webauthn"`）、`#exclude`（注册时带 `excludeCredentials`）、`#register`、`#login`（无用户名，`allowCredentials` 为空）、`#login-username`（`allowCredentials` 为该用户的凭据）。
-- `/?conditional=1`：页面加载即发起 `mediation: 'conditional'` 登录；点按钮会先 abort 它。
+- `/?conditional=1` 在页面加载时发起 `mediation: 'conditional'` 登录。点击按钮会中止该请求。
+- `/?uv=required` 让 RP 在选项中请求 UV，并在通过 SimpleWebAuthn 校验响应时要求 UV。
 - `#result`：`registered:<用户名>`、`authenticated:<用户名>`（服务端校验通过，用户名由 `userHandle` 找回）、`error:<DOMException name>`、`rejected:<RP 拒绝原因>`、`pending:<动作>`。
 - 接口：`POST /api/reset` 清空状态，`GET /api/state` 查看用户和凭据，`GET /healthz`。
 
 ## 端口与临时文件
 
 - 服务端 `127.0.0.1:18421`，RP `18422`；可用 `PKB_E2E_SERVER_PORT` / `PKB_E2E_RP_PORT` 覆盖。
-- 运行时文件都在 `/tmp/pkb-e2e/`：`rp/`、`stack/`（服务端二进制、数据库、日志、随机生成的账号密码）运行结束即删除，设 `PKB_E2E_KEEP_TMP=1` 保留；`test-results/` 存失败现场。
+- 运行时文件默认位于 `/tmp/pkb-e2e/`，可用 `PKB_E2E_TMP_ROOT` 指定独立目录。`rp/`、`stack/`（服务端二进制、数据库、日志、随机生成的账号密码）运行结束即删除，设 `PKB_E2E_KEEP_TMP=1` 保留；`test-results/` 存失败现场。
