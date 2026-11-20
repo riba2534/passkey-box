@@ -221,6 +221,18 @@ describe("device verification gate", () => {
     expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
     expect(store.credentials).toHaveLength(0);
   });
+
+  it("suppresses the response if the site aborted during the authorized write", async () => {
+    const store = new MemoryStore();
+    const controller = new AbortController();
+    const write = store.createCredential.bind(store);
+    store.createCredential = async (credential) => {
+      await write(credential);
+      controller.abort();
+    };
+    const result = await handleRequest(createReq(), { ...deps(store), signal: controller.signal });
+    expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
+  });
 });
 
 describe("handleRequest: get", () => {

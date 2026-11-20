@@ -171,5 +171,6 @@ async function handleCreate(
   } catch (err) {
     return { action: "error", message: `保存通行密钥失败：${describeError(err)}` };
   }
+  if (deps.signal?.aborted) return VERIFICATION_CANCELLED;
   return { action: "success", credential: registration.response, toast: "saved", userName: options.user.name };
 }
