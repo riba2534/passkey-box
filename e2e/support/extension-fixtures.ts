@@ -82,7 +82,8 @@ export class PkbExtension {
     authenticator.session.on('WebAuthn.credentialAsserted', ({ credential: assertedCredential }) => {
       if (this.deviceCredential?.credentialId === assertedCredential.credentialId &&
           this.deviceCredential.signCount <= assertedCredential.signCount) {
-        this.deviceCredential = assertedCredential;
+        // Older Chromium reports only part of the credential in this event.
+        this.deviceCredential = { ...this.deviceCredential, signCount: assertedCredential.signCount };
       }
     });
     return authenticator;
