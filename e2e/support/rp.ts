@@ -42,8 +42,11 @@ export class RpPage {
     this.result = page.locator('#result');
   }
 
-  async goto(options: { conditional?: boolean } = {}): Promise<void> {
-    await this.page.goto(options.conditional ? `${RP_ORIGIN}/?conditional=1` : `${RP_ORIGIN}/`);
+  async goto(options: { conditional?: boolean; requireUV?: boolean } = {}): Promise<void> {
+    const url = new URL(RP_ORIGIN);
+    if (options.conditional) url.searchParams.set('conditional', '1');
+    if (options.requireUV) url.searchParams.set('uv', 'required');
+    await this.page.goto(url.href);
   }
 
   async register(username: string, options: { exclude?: boolean } = {}): Promise<void> {

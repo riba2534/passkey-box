@@ -10,6 +10,8 @@
 //   conditional-unavailable      isConditionalMediationAvailable() was false
 
 const $ = (selector) => document.querySelector(selector);
+const settings = new URLSearchParams(location.search);
+const requireUV = settings.get('uv') === 'required';
 
 class RpRejection extends Error {
   constructor(code) {
@@ -116,7 +118,7 @@ function abortConditional() {
 async function register() {
   abortConditional();
   const username = $('#username').value;
-  const { flowId, options } = await api('/api/register/options', { username, exclude: $('#exclude').checked });
+  const { flowId, options } = await api('/api/register/options', { username, exclude: $('#exclude').checked, requireUV });
   const credential = await navigator.credentials.create({ publicKey: creationOptions(options) });
   const result = await api('/api/register/verify', { flowId, response: registrationJSON(credential) });
   return `registered:${result.username}`;
@@ -124,7 +126,7 @@ async function register() {
 
 async function login(username) {
   abortConditional();
-  const { flowId, options } = await api('/api/login/options', username === null ? {} : { username });
+  const { flowId, options } = await api('/api/login/options', username === null ? { requireUV } : { username, requireUV });
   const credential = await navigator.credentials.get({ publicKey: requestOptions(options) });
   const result = await api('/api/login/verify', { flowId, response: authenticationJSON(credential) });
   return `authenticated:${result.username}`;
@@ -139,7 +141,7 @@ async function startConditional() {
   conditional = controller;
   setResult('pending:conditional');
   try {
-    const { flowId, options } = await api('/api/login/options', {});
+    const { flowId, options } = await api('/api/login/options', { requireUV });
     const credential = await navigator.credentials.get({
       publicKey: requestOptions(options),
       mediation: 'conditional',
@@ -167,6 +169,6 @@ $('#register').addEventListener('click', () => run('register', register));
 $('#login').addEventListener('click', () => run('login', () => login(null)));
 $('#login-username').addEventListener('click', () => run('login-username', () => login($('#username').value)));
 
-if (new URLSearchParams(location.search).get('conditional') === '1') {
+if (settings.get('conditional') === '1') {
   startConditional();
 }

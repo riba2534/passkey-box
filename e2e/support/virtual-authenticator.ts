@@ -8,6 +8,7 @@ export type VirtualCredential = {
   credentialId: string; // standard base64
   isResidentCredential: boolean;
   rpId?: string;
+  privateKey: string; // synthetic ECDSA PKCS#8 key from this test authenticator
   userHandle?: string; // standard base64
   signCount: number;
 };
@@ -42,6 +43,21 @@ export class VirtualAuthenticator {
       },
     });
     return new VirtualAuthenticator(session, authenticatorId);
+  }
+
+  async addCredential(credential: VirtualCredential): Promise<void> {
+    await this.session.send('WebAuthn.addCredential', {
+      authenticatorId: this.authenticatorId,
+      credential,
+    });
+  }
+
+  async clearResponseFlag(flag: 'UV' | 'UP'): Promise<void> {
+    await this.session.send('WebAuthn.setResponseOverrideBits', {
+      authenticatorId: this.authenticatorId,
+      isBadUV: flag === 'UV',
+      isBadUP: flag === 'UP',
+    });
   }
 
   async credentials(): Promise<VirtualCredential[]> {

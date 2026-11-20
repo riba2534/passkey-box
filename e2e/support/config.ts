@@ -8,7 +8,7 @@ export const EXTENSION_DIR = path.join(REPO_ROOT, 'extension');
 export const EXTENSION_DIST = path.join(EXTENSION_DIR, 'dist');
 
 /** Everything the suite writes at runtime lives under here (never inside the repo). */
-export const TMP_ROOT = '/tmp/pkb-e2e';
+export const TMP_ROOT = process.env.PKB_E2E_TMP_ROOT ?? '/tmp/pkb-e2e';
 export const RP_TMP = path.join(TMP_ROOT, 'rp');
 export const STACK_TMP = path.join(TMP_ROOT, 'stack');
 export const RP_STATE_FILE = path.join(RP_TMP, 'state.json');

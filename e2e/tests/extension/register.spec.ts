@@ -7,7 +7,7 @@ test.beforeEach(async ({ extension, stack, rp }) => {
   await rp.goto();
 });
 
-test('registration saves the passkey to the server without asking', async ({ rp, ui, pkb, stack }) => {
+test('registration saves the passkey to the server after verifying on the device', async ({ rp, ui, pkb, stack }) => {
   await rp.registerOk('alice');
   await expect(ui.toast('saved')).toBeVisible();
   await ui.expectNoDialog();
