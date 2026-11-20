@@ -28,7 +28,7 @@ await cp(join(root, "static"), dist, { recursive: true });
 await Promise.all([
   // MV3 service worker declared with "type": "module".
   build({ ...common, entryPoints: [join(root, "src/background.ts")], outfile: join(dist, "background.js"), format: "esm" }),
-  ...["inject", "content", "popup", "options"].map((name) =>
+  ...["inject", "content", "popup", "options", "device"].map((name) =>
     build({ ...common, entryPoints: [join(root, `src/${name}.ts`)], outfile: join(dist, `${name}.js`), format: "iife" }),
   ),
 ]);

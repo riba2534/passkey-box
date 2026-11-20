@@ -98,6 +98,9 @@ describe("rpId", () => {
     expect(hostMatchesRpId("localhost", "localhost")).toBe(true);
     expect(hostMatchesRpId("LocalHost", "localhost")).toBe(true);
     expect(hostMatchesRpId("a.com", "com")).toBe(false);
+    expect(hostMatchesRpId("example.co.uk", "co.uk")).toBe(false);
+    expect(hostMatchesRpId("example.github.io", "github.io")).toBe(false);
+    expect(hostMatchesRpId("login.example.co.uk", "example.co.uk")).toBe(true);
     expect(hostMatchesRpId("app.localhost", "localhost")).toBe(false);
     expect(hostMatchesRpId("intranet", "intranet")).toBe(true);
     expect(hostMatchesRpId("a.b.example", "example")).toBe(false);

@@ -8,7 +8,8 @@ import { createPageUI } from "./ui/page-ui";
 
 if (window.isSecureContext) {
   const router = createContentRouter({
-    send: (request: BackgroundRequest) => chrome.runtime.sendMessage<BackgroundRequest, BackgroundResponse>(request),
+    send: (request) => chrome.runtime.sendMessage<BackgroundRequest & { requestId: string }, BackgroundResponse>(request),
+    cancel: (requestId) => void chrome.runtime.sendMessage({ type: "pkb:abort", requestId }).catch(() => undefined),
     post: (message) => window.postMessage(message, "*"),
     caller: () => callerInfo(location, window.origin),
     ui: createPageUI(document),

@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 
 const staticDir = join(import.meta.dirname, "..", "static");
 const manifest = JSON.parse(readFileSync(join(staticDir, "manifest.json"), "utf8"));
+const { version } = JSON.parse(readFileSync(join(staticDir, "..", "package.json"), "utf8"));
 
 describe("manifest.json (CONTRACT 4.2)", () => {
   it("identity and permissions", () => {
-    expect(manifest).toMatchObject({ manifest_version: 3, name: "Passkey Box", version: "0.1.0" });
+    expect(manifest).toMatchObject({ manifest_version: 3, name: "Passkey Box", version });
+    expect(manifest.key).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(manifest.permissions).toEqual(["storage", "tabs"]);
     expect(manifest.host_permissions).toEqual(["<all_urls>"]);
     expect(manifest.background).toEqual({ service_worker: "background.js", type: "module" });
@@ -27,7 +29,7 @@ describe("manifest.json (CONTRACT 4.2)", () => {
   });
 
   it("referenced static files exist", () => {
-    for (const file of ["popup.html", "options.html", "ui.css", ...Object.values<string>(manifest.icons)]) {
+    for (const file of ["popup.html", "options.html", "device.html", "ui.css", ...Object.values<string>(manifest.icons)]) {
       expect(existsSync(join(staticDir, file)), file).toBe(true);
     }
     const png = readFileSync(join(staticDir, "icons/icon-128.png"));
@@ -38,5 +40,6 @@ describe("manifest.json (CONTRACT 4.2)", () => {
   it("pages load their bundles", () => {
     expect(readFileSync(join(staticDir, "popup.html"), "utf8")).toContain('src="popup.js"');
     expect(readFileSync(join(staticDir, "options.html"), "utf8")).toContain('src="options.js"');
+    expect(readFileSync(join(staticDir, "device.html"), "utf8")).toContain('src="device.js"');
   });
 });

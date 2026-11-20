@@ -38,6 +38,18 @@ jobs:
           mkdir -p out
           (cd extension/dist && zip -qr "../../out/$name" .)
           (cd out && sha256sum "$name" > "$name.sha256")
+
+      - name: Build AnyBrowser distribution
+        working-directory: extension
+        env:
+          PKB_DEFAULT_SERVER_URL: https://password.riba2534.cn/
+        run: npm run build
+
+      - name: Package AnyBrowser distribution
+        run: |
+          name="passkey-box-extension-anybrowser-${GITHUB_REF_NAME}.zip"
+          (cd extension/dist && zip -qr "../../out/$name" .)
+          (cd out && sha256sum "$name" > "$name.sha256")
           ls -l out
 
       - name: Publish release

@@ -15,10 +15,12 @@ const FLAG_UV = 0x04;
 const FLAG_BE = 0x08;
 const FLAG_BS = 0x10;
 const FLAG_AT = 0x40;
-/** UP|UV|BE|BS|AT */
-export const FLAGS_REGISTER = FLAG_UP | FLAG_UV | FLAG_BE | FLAG_BS | FLAG_AT;
-/** UP|UV|BE|BS */
-export const FLAGS_ASSERT = FLAG_UP | FLAG_UV | FLAG_BE | FLAG_BS;
+const SYNCED_CREDENTIAL_FLAGS = FLAG_BE | FLAG_BS;
+
+function verifiedFlags(userVerified: true): number {
+  if (userVerified !== true) throw new TypeError("user verification required");
+  return FLAG_UP | FLAG_UV | SYNCED_CREDENTIAL_FLAGS;
+}
 
 const TRANSPORTS = ["hybrid", "internal"];
 const CREDENTIAL_ID_LENGTH = 32;
@@ -227,6 +229,7 @@ export interface CallerContext {
 }
 
 export interface RegistrationInput extends CallerContext {
+  userVerified: true;
   rpId: string;
   /** base64url */
   challenge: string;
@@ -249,7 +252,7 @@ export async function createRegistration(input: RegistrationInput): Promise<Regi
   const rpIdHash = await sha256(utf8(input.rpId));
   const authData = authenticatorData(
     rpIdHash,
-    FLAGS_REGISTER,
+    verifiedFlags(input.userVerified) | FLAG_AT,
     0,
     attestedCredentialData(aaguidBytes(), credentialId, key.cosePublicKey),
   );
@@ -278,6 +281,7 @@ export async function createRegistration(input: RegistrationInput): Promise<Regi
 }
 
 export interface AssertionInput extends CallerContext {
+  userVerified: true;
   rpId: string;
   /** base64url */
   challenge: string;
@@ -291,7 +295,7 @@ export interface AssertionInput extends CallerContext {
 
 export async function createAssertion(input: AssertionInput): Promise<AuthenticationResponseJSON> {
   const rpIdHash = await sha256(utf8(input.rpId));
-  const authData = authenticatorData(rpIdHash, FLAGS_ASSERT, 0);
+  const authData = authenticatorData(rpIdHash, verifiedFlags(input.userVerified), 0);
   const cdjBytes = utf8(clientDataJSON({ ...input, type: "webauthn.get" }));
   const signature = await signWithPkcs8(
     input.alg,
