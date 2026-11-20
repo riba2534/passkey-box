@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { TMP_ROOT } from './support/config.ts';
+import { CHROMIUM_EXECUTABLE_PATH, TMP_ROOT } from './support/config.ts';
 
 // Setup is done with project dependencies instead of a single globalSetup, so the RP harness
 // can run on its own while the extension suite additionally builds and starts the full stack:
@@ -20,6 +20,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     channel: 'chromium',
+    launchOptions: { executablePath: CHROMIUM_EXECUTABLE_PATH },
     headless: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

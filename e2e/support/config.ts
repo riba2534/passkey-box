@@ -6,6 +6,7 @@ export const REPO_ROOT = path.resolve(E2E_DIR, '..');
 export const SERVER_DIR = path.join(REPO_ROOT, 'server');
 export const EXTENSION_DIR = path.join(REPO_ROOT, 'extension');
 export const EXTENSION_DIST = path.join(EXTENSION_DIR, 'dist');
+export const CHROMIUM_EXECUTABLE_PATH = process.env.PKB_E2E_CHROMIUM || undefined;
 
 /** Everything the suite writes at runtime lives under here (never inside the repo). */
 export const TMP_ROOT = process.env.PKB_E2E_TMP_ROOT ?? '/tmp/pkb-e2e';

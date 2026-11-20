@@ -83,3 +83,11 @@ test('conditional page starts an autofill login on load', async ({ rp }) => {
   await expect(rp.username).toHaveAttribute('autocomplete', 'username webauthn');
   await rp.expectResult('authenticated:alice');
 });
+
+test('a strict relying party rejects a native assertion without user verification', async ({ rp, authenticator }) => {
+  await rp.goto({ requireUV: true });
+  await rp.registerOk('alice');
+  await authenticator.clearResponseFlag('UV');
+  await rp.login();
+  await rp.expectResult('rejected:assertion-invalid');
+});
