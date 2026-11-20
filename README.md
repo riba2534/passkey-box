@@ -9,7 +9,7 @@
   <br />
   Chrome 扩展接管网站的通行密钥注册与登录，密钥统一存放在你自己的服务器上。
   <br />
-  只匹配到一个账号就直接登录，有多个账号才让你选，全程不弹系统指纹。
+  自动匹配账号，通过设备验证后继续网站登录。
 </p>
 
 <p align="center">
@@ -40,20 +40,20 @@
 ---
 
 > [!WARNING]
-> **Passkey Box 面向测试与自用场景，刻意不做安全设计。** 私钥以明文保存在服务端，扩展不加锁、不二次确认，签名时直接声明已完成用户验证。请只在你信任的环境里使用，不要用它保管重要账号。
+> **请保护 Passkey Box 服务端和账号。** 扩展在设备验证通过后才生成网站凭据或签名。凭据私钥以明文保存在服务端，能够读到私钥的一方仍可在扩展之外签名。
 
 ## Passkey Box 是什么
 
 Passkey Box 由两部分组成：
 
-- **Chrome 扩展**：在网页调用 `navigator.credentials.create()` / `get()` 时接管请求，自己充当认证器完成签名，不经过操作系统，所以不会弹出指纹、Windows Hello 或手机扫码。
-- **服务端**：Go 单二进制 + SQLite，多用户，带一个仿 1Password 风格的 Web 后台。扩展里填好服务器地址、用户名和密码，就能在任何一台电脑上使用这个账号下保存的全部通行密钥。
+- **Chrome 扩展**处理顶层网页的 WebAuthn 请求。它先通过 Chromium 原生 WebAuthn 验证设备凭据，再生成网站凭据或签名。
+- **服务端**使用 Go 和 SQLite，提供多用户凭据同步和 Web 管理后台。每个浏览器 Profile 单独设置设备验证。
 
-它适合这类场景：你有一批网站要用通行密钥批量登录，同一个网站下还有好几个账号；你希望登录时不被系统认证打断，也不想把密钥锁在某一台设备或某一家云服务里。
+同一台服务器可以同步多个网站和账号的通行密钥。
 
 ### 为什么选择 Passkey Box
 
-- **不打断** — 只匹配到一个通行密钥时直接登录；网站一打开就发起的自动填充式请求，也能在页面加载时直接完成登录。
+- **自动匹配** — 只有一个通行密钥时直接进入设备验证，成功后自动向网站提交签名。
 - **多账号清楚可控** — 网站指定了账号（先输用户名再登录）时精确匹配；同一网站有多个账号时，在页面右上角弹出 1Password 风格的选择框。
 - **密钥在自己手里** — 通行密钥保存在你部署的服务器上，多台电脑、多个浏览器共用同一份数据；签名计数固定为 0，多端同时使用也不会冲突。
 - **多用户 Web 后台** — 每个用户只能看到自己的通行密钥；管理员可以创建用户、重置密码，并查看所有用户的通行密钥。
@@ -64,8 +64,8 @@ Passkey Box 由两部分组成：
 
 | 模块 | 能力 |
 |---|---|
-| **注册** | 网站创建通行密钥时自动生成并上传到服务端，不弹确认；同一网站同一账号重复注册会覆盖旧的；命中 `excludeCredentials` 时按规范返回 `InvalidStateError` |
-| **登录** | 精确匹配 `allowCredentials`；单个候选直接签名；多个候选弹出选择框；支持 conditional mediation（页面打开即登录） |
+| **注册** | 通过设备验证后生成并保存通行密钥。同一网站同一账号重复注册会覆盖旧的。命中 `excludeCredentials` 时返回 `InvalidStateError`。 |
+| **登录** | 按 `allowCredentials` 匹配，多个候选可选账号。支持 conditional mediation，签名前执行设备验证。 |
 | **认证器** | ES256（P-256）与 RS256；`none` 证明；BE/BS 备份标志置位；返回对象通过 `instanceof PublicKeyCredential`，实现 `toJSON()` 等 WebAuthn L3 方法 |
 | **扩展界面** | 页面内选择框与提示条；弹出窗口按「当前网站 / 全部」列出通行密钥，可搜索、查看详情、删除；两个自动登录开关 |
 | **Web 后台** | 我的通行密钥（按网站分组、搜索、备注、使用统计）、用户管理（管理员）、账户设置、插件下载与安装指引；适配手机宽度，可添加到手机主屏幕 |
@@ -141,7 +141,9 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 
 ### 4. 登录扩展
 
-点击工具栏上的 Passkey Box 图标，填入服务器地址、用户名和密码。之后在任意网站注册或使用通行密钥，扩展都会自动处理。
+点击工具栏上的 Passkey Box 图标，填入服务器地址、用户名和密码。打开「设置 → 设备验证」，在该 Profile 注册一个设备凭据。可用的验证方式由 Chromium 和认证器提供，例如系统生物识别或支持 PIN 的 FIDO2 安全密钥。
+
+从 v0.1.0 升级后，固定的扩展 ID 会创建一份新的本地扩展设置。请重新登录并设置设备验证。服务器上的网站凭据可以继续使用。
 
 ## 使用说明
 
@@ -150,24 +152,24 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 | 情况 | 行为 |
 |---|---|
 | 网站指定了凭据（先输用户名再登录，`allowCredentials` 非空） | 只在指定的凭据里匹配 |
-| 只匹配到 1 个通行密钥 | 直接登录，右上角提示「已使用 xxx 登录」 |
-| 匹配到多个通行密钥 | 弹出选择框，点哪个用哪个 |
+| 只匹配到 1 个通行密钥 | 进入设备验证，通过后自动向网站提交签名 |
+| 匹配到多个通行密钥 | 选中账号后进入设备验证 |
 | 一个也没有 | 提示未找到，可「使用其他方式」交给浏览器原生实现，或取消 |
-| 页面打开时的自动填充式请求（conditional mediation） | 1 个候选直接登录；多个弹选择框；没有候选或服务器连不上时保持静默 |
+| 页面打开时的自动填充式请求（conditional mediation） | 单个候选进入设备验证，多个候选先选账号。未设置设备验证、无候选或服务器不可用时保持静默。 |
 
 ### 注册
 
-网站创建通行密钥时，扩展直接生成密钥并保存到服务端，右上角提示「通行密钥已保存」。同一网站、同一账号（相同 `user.id`）再次注册会覆盖旧的，不会留下重复项。
+网站请求注册时，扩展先显示请求网站并要求设备验证。通过后生成密钥并保存到服务器。同一网站、同一账号（相同 `user.id`）再次注册会覆盖旧的。
 
 ### 扩展设置
 
 弹出窗口的「设置」里有两个开关，默认都打开：
 
-- **只匹配到一个时自动登录**：关闭后，即使只有一个候选也会弹出选择框。
-- **页面打开时自动登录**：关闭后，页面加载时发起的自动填充式请求不再自动完成。在只存了一个账号的网站上注册第二个账号前，可以先关掉它。
+- **只有一个账号时跳过选择**。关闭后，单候选也先打开选择框。
+- **响应页面的自动填充请求**。打开后，当前标签页的自动填充请求也能带出 Passkey Box 的账号选择或设备验证。
 
 > [!NOTE]
-> 已经登录扩展时，只有你在对话框里主动点「使用其他方式」，请求才会交给浏览器原生实现，也只有这时才可能出现系统认证。
+> 无法完成设备验证时，当前请求会取消。嵌入式页面的 WebAuthn 由浏览器原生实现处理。更换设备后，可在新的浏览器 Profile 重新登录并设置设备验证。
 
 ## 工作原理
 
@@ -178,33 +180,35 @@ sequenceDiagram
     participant Content as content.js<br/>扩展隔离环境
     participant SW as Service Worker
     participant Server as Passkey Box 服务端
+    participant Device as 设备验证窗口
 
     Site->>Inject: navigator.credentials.get()
     Inject->>Content: postMessage
     Content->>SW: chrome.runtime.sendMessage
     SW->>Server: GET /api/v1/credentials?rp_id=…
     Server-->>SW: 该网站的通行密钥
-    alt 只有一个候选
-        SW->>SW: WebCrypto 签名
-    else 多个候选
+    opt 需要选择账号
         SW-->>Content: 候选账号
         Content->>Content: 页面右上角显示选择框
         Content->>SW: 用户选中的账号
-        SW->>SW: WebCrypto 签名
     end
+    SW->>Device: 单次验证请求
+    Device->>Device: 原生 WebAuthn 用户验证
+    Device-->>SW: 设备断言
+    SW->>SW: 验证设备断言并生成网站签名
     SW-->>Inject: 断言结果
     Inject-->>Site: PublicKeyCredential
 ```
 
 - `inject.js` 在 `document_start` 阶段注入页面主环境（MAIN world），替换 `CredentialsContainer.prototype.create/get`，并让能力检测方法返回「支持通行密钥」。这也是 1Password、Bitwarden 等浏览器扩展采用的做法；Chrome 没有提供让扩展充当通行密钥提供方的专用 API。
 - `content.js` 运行在扩展的隔离环境，负责转发请求和绘制页面内界面（放在 open shadow root 里，不受页面样式影响）。
-- Service Worker 读取配置、请求服务端，用 WebCrypto 生成密钥和签名，按 WebAuthn 规范拼出 `authenticatorData`、`clientDataJSON` 和 CBOR 编码的 `attestationObject`。
+- Service Worker 校验设备凭据的来源、签名、一次性 challenge 和用户验证结果。通过后，用 WebCrypto 生成网站凭据或签名。
 
 | 认证器参数 | 取值 |
 |---|---|
 | 算法 | ES256（优先）、RS256 |
 | 证明格式 | `none` |
-| 标志位 | 注册 `UP UV BE BS AT`，登录 `UP UV BE BS` |
+| 标志位 | 原生设备验证成功后，注册返回 `UP UV BE BS AT`，登录返回 `UP UV BE BS` |
 | 签名计数 | 恒为 0，多端共用同一把密钥不会触发计数回退 |
 | 凭据 ID | 32 字节随机数 |
 
@@ -233,7 +237,7 @@ make zip-extension  # 打包扩展
 ```
 
 - **单元测试**：扩展的认证器输出用 [`@simplewebauthn/server`](https://simplewebauthn.dev/) 校验，覆盖 ES256 / RS256 的注册与登录。
-- **端到端测试**：`e2e/` 自带一个用 `@simplewebauthn/server` 实现的测试网站，Playwright 加载真实扩展和服务端，覆盖自动登录、选择框、账号隔离、覆盖注册、回退到原生实现等场景，并用 Chrome 虚拟认证器断言已登录扩展时浏览器原生实现一次也没有被调用。
+- **端到端测试**使用本地网站、真实扩展、服务端和 Chromium 测试认证器，覆盖注册、登录、账号选择、设备验证失败和浏览器原生回退。
 - CI 在每次推送和 PR 上运行以上全部测试。
 
 ```text

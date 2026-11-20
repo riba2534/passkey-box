@@ -76,12 +76,12 @@ export function loginForm(doc: Document, opts: LoginFormOptions): HTMLFormElemen
 
 const SETTING_LABELS: Record<keyof Settings, { title: string; desc: string }> = {
   autoLoginSingle: {
-    title: "只匹配到一个时自动登录",
-    desc: "网站请求通行密钥时，如果只找到一个账号，直接使用它登录，不弹出选择框。",
+    title: "只有一个账号时跳过选择",
+    desc: "找到唯一账号时，直接进入设备验证。",
   },
   conditionalAutoLogin: {
-    title: "页面打开时自动登录",
-    desc: "网站在页面打开时就请求通行密钥（自动填充式登录）时，直接使用匹配到的账号登录。",
+    title: "响应页面的自动填充请求",
+    desc: "当前标签页发起通行密钥自动填充请求时，进入账号选择或设备验证。",
   },
 };
 

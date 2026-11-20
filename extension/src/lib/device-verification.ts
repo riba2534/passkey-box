@@ -37,7 +37,8 @@ interface Pending extends DeviceOperation {
 }
 
 type DeviceMessage =
-  | { type: "pkb:device:status" | "pkb:device:enroll-begin" }
+  | { type: "pkb:device:status" }
+  | { type: "pkb:device:enroll-begin" }
   | { type: "pkb:device:enroll-complete"; credential: RegistrationResponseJSON }
   | { type: "pkb:device:request" | "pkb:device:cancel"; requestId: string }
   | { type: "pkb:device:complete"; requestId: string; credential: AuthenticationResponseJSON };
