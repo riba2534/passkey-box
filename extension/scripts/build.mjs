@@ -41,6 +41,7 @@ const common = {
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(join(root, "static"), dist, { recursive: true });
+await cp(join(root, "..", "LICENSE"), join(dist, "LICENSE"));
 
 const lock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8"));
 const notices = await Promise.all(Object.entries(lock.packages)
