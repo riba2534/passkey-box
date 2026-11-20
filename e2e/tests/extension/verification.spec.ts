@@ -3,13 +3,16 @@ import { expect, test } from '../../support/extension-fixtures.ts';
 import { rpApi } from '../../support/rp.ts';
 
 test('a configured but unenrolled extension rejects required registration before writing', async ({
-  extension, stack, authenticator, rp, pkb,
+  extension, stack, authenticator, rp, pkb, ui,
 }) => {
   extension.autoVerify = false;
   await extension.configure(stack.users.a, {}, { enroll: false });
   await rp.goto({ requireUV: true });
   await rp.register('alice');
 
+  await expect(ui.dialog('error')).toContainText('设备验证');
+  expect(await pkb.listCredentials(stack.users.a)).toEqual([]);
+  await ui.action('error', 'cancel').click();
   await rp.expectResult('error:NotAllowedError');
   expect(await pkb.listCredentials(stack.users.a)).toEqual([]);
   expect((await rpApi.user('alice')).credentials).toEqual([]);
