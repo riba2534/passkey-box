@@ -227,8 +227,9 @@ describe("device verification gate", () => {
     const controller = new AbortController();
     const write = store.createCredential.bind(store);
     store.createCredential = async (credential) => {
-      await write(credential);
+      const saved = await write(credential);
       controller.abort();
+      return saved;
     };
     const result = await handleRequest(createReq(), { ...deps(store), signal: controller.signal });
     expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
