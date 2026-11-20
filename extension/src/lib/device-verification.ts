@@ -31,8 +31,10 @@ interface Enrollment {
 interface Pending extends DeviceOperation {
   id: string;
   challenge: string;
+  expires: number;
   credential: DeviceCredential;
   windowId?: number;
+  documentId?: string;
   finish(approved: boolean): void;
 }
 
@@ -87,7 +89,7 @@ export class DeviceVerification {
         resolve(verified);
       };
       const cancel = () => finish(false);
-      const request: Pending = { ...operation, id, challenge: randomChallenge(), credential, finish };
+      const request: Pending = { ...operation, id, challenge: randomChallenge(), expires: Date.now() + TIMEOUT_MS, credential, finish };
       this.pending = request;
       const timer = setTimeout(cancel, TIMEOUT_MS);
       signal.addEventListener("abort", cancel, { once: true });
@@ -124,10 +126,17 @@ export class DeviceVerification {
       case "pkb:device:cancel":
       case "pkb:device:complete": {
         const request = this.pending;
-        if (!request || request.id !== message.requestId || sender.url !== this.requestURL(request.id)) {
+        if (!request || request.id !== message.requestId || sender.url !== this.requestURL(request.id) ||
+            (request.windowId !== undefined && sender.tab?.windowId !== request.windowId) ||
+            (request.documentId && request.documentId !== sender.documentId)) {
           return { ok: false, error: "验证请求已失效，请回到网站重试。" };
         }
+        if (request.expires <= Date.now()) {
+          request.finish(false);
+          return { ok: false, error: "验证请求已超时，请回到网站重试。" };
+        }
         if (message.type === "pkb:device:request") {
+          request.documentId = sender.documentId;
           return {
             challenge: request.challenge,
             credentialId: request.credential.id,
@@ -135,6 +144,7 @@ export class DeviceVerification {
             operation: request.operation,
           };
         }
+        if (!request.documentId) return { ok: false, error: "验证窗口未就绪。" };
         if (message.type === "pkb:device:cancel") {
           request.finish(false);
           return { ok: true };
@@ -185,6 +195,10 @@ export class DeviceVerification {
 
   private async completeRequest(request: Pending, response: AuthenticationResponseJSON): Promise<unknown> {
     if (this.checking) return { ok: false, error: "该验证请求已提交。" };
+    if (response?.id !== request.credential.id) {
+      request.finish(false);
+      return { ok: false, error: "设备凭据与本次请求不匹配。" };
+    }
     this.checking = true;
     try {
       const result = await verifyAuthenticationResponse({
@@ -199,14 +213,17 @@ export class DeviceVerification {
         },
         requireUserVerification: true,
       });
-      if (this.pending !== request || !result.verified || !result.authenticationInfo.userVerified) {
+      if (this.pending !== request || request.expires <= Date.now() || !result.verified || !result.authenticationInfo.userVerified) {
         request.finish(false);
         return { ok: false, error: "设备未完成本次用户验证。" };
       }
       await chrome.storage.local.set({
         [DEVICE_KEY]: { ...request.credential, counter: result.authenticationInfo.newCounter },
       });
-      if (this.pending !== request) return { ok: false, error: "本次验证已取消。" };
+      if (this.pending !== request || request.expires <= Date.now()) {
+        request.finish(false);
+        return { ok: false, error: "本次验证已取消。" };
+      }
       request.finish(true);
       return { ok: true };
     } catch {
