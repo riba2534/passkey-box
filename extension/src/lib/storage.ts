@@ -12,8 +12,9 @@ export async function saveConfig(config: Config): Promise<void> {
   await chrome.storage.local.set({ [CONFIG_KEY]: config });
 }
 
+/** Signing out also forgets which credentials this profile registered or used. */
 export async function clearConfig(): Promise<void> {
-  await chrome.storage.local.remove(CONFIG_KEY);
+  await chrome.storage.local.remove([CONFIG_KEY, OWNED_KEY]);
 }
 
 export async function loadSettings(): Promise<Settings> {

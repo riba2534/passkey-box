@@ -107,7 +107,7 @@ async function handleGet(
   }
   if (deps.signal?.aborted) return ABORTED;
   store.useCredential(chosen.id).catch(() => undefined);
-  await deps.owned.remember(chosen.id).catch(() => undefined);
+  deps.owned.remember(chosen.id).catch(() => undefined);
   return { action: "success", credential, toast: "signed-in", userName: chosen.user_name };
 }
 
@@ -159,7 +159,8 @@ async function handleCreate(
   } catch (err) {
     return { action: "error", message: `保存通行密钥失败：${describeError(err)}` };
   }
+  // Saved on the server by this profile, even if the page no longer takes the result.
+  deps.owned.remember(registration.credentialId).catch(() => undefined);
   if (deps.signal?.aborted) return ABORTED;
-  await deps.owned.remember(registration.credentialId).catch(() => undefined);
   return { action: "success", credential: registration.response, toast: "saved", userName: options.user.name };
 }

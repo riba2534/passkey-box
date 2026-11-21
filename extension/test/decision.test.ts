@@ -47,11 +47,18 @@ describe("decideGet with credentials of this browser profile", () => {
   it("one of several counts as the only candidate", () => {
     expect(decideGet(3, undefined, on, 1)).toBe("auto");
     expect(decideGet(3, "conditional", on, 1)).toBe("auto");
-    expect(decideGet(3, "conditional", { autoLoginSingle: false, conditionalAutoLogin: true }, 1)).toBe("auto");
   });
 
-  it("still follows the settings", () => {
-    expect(decideGet(3, undefined, { autoLoginSingle: false, conditionalAutoLogin: true }, 1)).toBe("picker");
+  it("only applies with autoLoginSingle, for modal and conditional requests alike", () => {
+    const choose = { autoLoginSingle: false, conditionalAutoLogin: true };
+    expect(decideGet(3, undefined, choose, 1)).toBe("picker");
+    expect(decideGet(3, "conditional", choose, 1)).toBe("picker");
+    // A conditional request with a single candidate still signs in, as before.
+    expect(decideGet(1, "conditional", choose, 1)).toBe("auto");
+    expect(decideGet(1, "conditional", choose, 0)).toBe("auto");
+  });
+
+  it("conditional requests still follow conditionalAutoLogin", () => {
     expect(decideGet(3, "conditional", { autoLoginSingle: true, conditionalAutoLogin: false }, 1)).toBe("pending");
   });
 

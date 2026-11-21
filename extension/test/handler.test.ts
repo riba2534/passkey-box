@@ -40,14 +40,29 @@ class MemoryProfile implements OwnedStore {
   clock = 0;
   failLoad = false;
   failRemember = false;
+  /** Writes never finish, like a stalled chrome.storage. */
+  stall = false;
+  writes: Array<Promise<void>> = [];
 
   async load() {
     if (this.failLoad) throw new Error("storage unavailable");
     return this.owned;
   }
-  async remember(id: string) {
+  remember(id: string) {
+    if (this.stall) return new Promise<void>(() => undefined);
+    const write = this.write(id);
+    this.writes.push(write);
+    return write;
+  }
+  private async write(id: string) {
+    // Like chrome.storage, the write lands after the handler has moved on.
+    await new Promise((resolve) => setTimeout(resolve, 1));
     if (this.failRemember) throw new Error("quota exceeded");
     this.owned = rememberCredential(this.owned, id, ++this.clock);
+  }
+  /** Waits for the writes the handler started without waiting for them. */
+  async settled() {
+    await Promise.allSettled(this.writes);
   }
 }
 
@@ -92,6 +107,7 @@ async function register(store: MemoryStore, name: string, alg = -7, profile?: Me
     deps(store, { profile }),
   );
   if (res.action !== "success") throw new Error(`register failed: ${JSON.stringify(res)}`);
+  await profile?.settled();
   return res.credential as RegistrationResponseJSON;
 }
 
@@ -393,10 +409,11 @@ describe("handleRequest: credentials of this browser profile", () => {
   const signedInAs = (res: unknown) => (res as { userName?: string }).userName;
   const pickerOf = (res: unknown) => (res as { candidates: Array<{ id: string; user_name: string; owned?: boolean }> }).candidates;
 
-  it("remembers a registered credential only after the server saved it", async () => {
+  it("remembers a registered credential once the server saved it", async () => {
     const store = new MemoryStore();
     const profile = new MemoryProfile();
     const res = await handleRequest(createReq(), deps(store, { profile }));
+    await profile.settled();
     expect([...profile.owned.keys()]).toEqual([(res as { credential: RegistrationResponseJSON }).credential.id]);
 
     const failed = new MemoryProfile();
@@ -409,7 +426,36 @@ describe("handleRequest: credentials of this browser profile", () => {
     const controller = new AbortController();
     controller.abort();
     await handleRequest(createReq(), { ...deps(store, { profile: failed }), signal: controller.signal });
+    await failed.settled();
     expect(failed.owned.size).toBe(0);
+  });
+
+  it("remembers a credential saved before the page aborted", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    const controller = new AbortController();
+    const write = store.createCredential.bind(store);
+    store.createCredential = async (credential) => {
+      const saved = await write(credential);
+      controller.abort();
+      return saved;
+    };
+    const result = await handleRequest(createReq(), { ...deps(store, { profile }), signal: controller.signal });
+    expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
+    await profile.settled();
+    expect([...profile.owned.keys()]).toEqual([store.credentials[0]!.id]);
+  });
+
+  it("does not wait for the record before answering", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    await register(store, "quinn", -7, profile);
+    await register(store, "rose");
+    profile.stall = true;
+    const within = <T>(work: Promise<T>) =>
+      Promise.race([work, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 1000))]);
+    expect(await within(handleRequest(getReq(), deps(store, { profile })))).toMatchObject({ action: "success", userName: "quinn" });
+    expect(await within(handleRequest(createReq(), deps(store, { profile })))).toMatchObject({ action: "success" });
   });
 
   it("several accounts, one registered here → signs with it without a picker", async () => {
@@ -433,6 +479,7 @@ describe("handleRequest: credentials of this browser profile", () => {
     expect(profile.owned.size).toBe(0);
 
     await handleRequest(getReq(getOptions(), { credentialId: dan.id }), deps(store, { profile }));
+    await profile.settled();
     expect([...profile.owned.keys()]).toEqual([dan.id]);
     expect(signedInAs(await handleRequest(getReq(), deps(store, { profile })))).toBe("dan");
   });
@@ -444,6 +491,7 @@ describe("handleRequest: credentials of this browser profile", () => {
     await register(store, "frank");
     await register(store, "gina", -7, profile);
     await handleRequest(getReq(getOptions(), { credentialId: erin.id }), deps(store, { profile }));
+    await profile.settled();
 
     const res = await handleRequest(getReq(), deps(store, { profile }));
     expect(res.action).toBe("picker");
@@ -467,14 +515,19 @@ describe("handleRequest: credentials of this browser profile", () => {
     ]);
   });
 
-  it("conditional requests sign in with it, unless conditionalAutoLogin is off", async () => {
+  it("conditional requests sign in with it, unless autoLoginSingle or conditionalAutoLogin is off", async () => {
     const store = new MemoryStore();
     const profile = new MemoryProfile();
     await register(store, "jack");
     await register(store, "kate", -7, profile);
     const conditional = getReq(getOptions(), { mediation: "conditional" });
     expect(signedInAs(await handleRequest(conditional, deps(store, { profile })))).toBe("kate");
-    expect(signedInAs(await handleRequest(conditional, deps(store, { profile, settings: { autoLoginSingle: false } })))).toBe("kate");
+    const choose = await handleRequest(conditional, deps(store, { profile, settings: { autoLoginSingle: false } }));
+    expect(choose.action).toBe("picker");
+    expect(pickerOf(choose).map((c) => [c.user_name, c.owned])).toEqual([
+      ["kate", true],
+      ["jack", false],
+    ]);
     expect(await handleRequest(conditional, deps(store, { profile, settings: { conditionalAutoLogin: false } }))).toEqual({
       action: "pending",
     });

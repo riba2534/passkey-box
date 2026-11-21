@@ -5,7 +5,8 @@ import type { Settings } from "./config";
 import type { OwnedCredentials } from "./owned";
 
 /**
- * auto    – sign right away with the only candidate, or the only one this browser profile registered or used
+ * auto    – sign right away with the only candidate, or (with autoLoginSingle) the only one this browser profile
+ *           registered or used
  * picker  – let the user choose
  * empty   – show the "no passkey" dialog
  * pending – stay silent until the page aborts
@@ -18,8 +19,9 @@ export function decideGet(
   settings: Settings,
   ownedCount = 0,
 ): GetDecision {
-  // Among several accounts, the only one this browser profile registered or used counts as the only candidate.
-  const count = candidateCount > 1 && ownedCount === 1 ? 1 : candidateCount;
+  // Among several accounts, the only one this browser profile registered or used counts as the only candidate,
+  // unless the user turned off skipping the choice: then several accounts always show the picker.
+  const count = candidateCount > 1 && ownedCount === 1 && settings.autoLoginSingle ? 1 : candidateCount;
   if (mediation === "conditional") {
     if (!settings.conditionalAutoLogin || count === 0) return "pending";
     return count === 1 ? "auto" : "picker";
