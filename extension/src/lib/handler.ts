@@ -4,7 +4,8 @@ import { describeError, type Credential, type NewCredential } from "./api";
 import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlgorithm } from "./authenticator";
 import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
-import { decideGet, filterByAllowList, hasExcludedCredential, selectAlgorithm } from "./decision";
+import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "./decision";
+import type { OwnedCredentials } from "./owned";
 import { requestedRpId, type BackgroundRequest, type BackgroundResponse, type CandidateSummary } from "./protocol";
 import { effectiveRpId, hostMatchesRpId } from "./rpid";
 
@@ -14,10 +15,17 @@ export interface CredentialStore {
   useCredential(id: string): Promise<void>;
 }
 
+/** Credentials registered or used in this browser profile (owned.ts). */
+export interface OwnedStore {
+  load(): Promise<OwnedCredentials>;
+  remember(id: string): Promise<void>;
+}
+
 export interface HandlerDeps {
   loadConfig(): Promise<Config | null>;
   loadSettings(): Promise<Settings>;
   store(config: Config): CredentialStore;
+  owned: OwnedStore;
   signal?: AbortSignal;
 }
 
@@ -28,8 +36,8 @@ const MSG_ALG = "None of the requested public key algorithms are supported. Pass
 // The page aborted the request (AbortSignal, navigation or tab close): discard the result.
 const ABORTED = { action: "reject", name: "NotAllowedError", message: "请求已取消。" } as const;
 
-function summarize(c: Credential): CandidateSummary {
-  return { id: c.id, user_name: c.user_name, user_display_name: c.user_display_name, rp_id: c.rp_id };
+function summarize(c: Credential, owned: OwnedCredentials): CandidateSummary {
+  return { id: c.id, user_name: c.user_name, user_display_name: c.user_display_name, rp_id: c.rp_id, owned: owned.has(c.id) };
 }
 
 export async function handleRequest(req: BackgroundRequest, deps: HandlerDeps): Promise<BackgroundResponse> {
@@ -67,11 +75,16 @@ async function handleGet(
     chosen = candidates.find((c) => c.id === req.credentialId);
     if (!chosen) return { action: "error", message: "所选的通行密钥已不存在，请重试。" };
   } else {
-    const decision = decideGet(candidates.length, req.mediation, await deps.loadSettings());
+    // Accounts this browser profile registered or used come first; a single one of them signs in
+    // like the only candidate. Without the record, every account is treated alike.
+    const owned = await deps.owned.load().catch(() => new Map<string, number>());
+    const ranked = rankOwnedFirst(candidates, owned);
+    const ownedCount = ranked.filter((c) => owned.has(c.id)).length;
+    const decision = decideGet(candidates.length, req.mediation, await deps.loadSettings(), ownedCount);
     if (decision === "pending") return { action: "pending" };
     if (decision === "empty") return { action: "empty" };
-    if (decision === "picker") return { action: "picker", candidates: candidates.map(summarize) };
-    chosen = candidates[0]!;
+    if (decision === "picker") return { action: "picker", candidates: ranked.map((c) => summarize(c, owned)) };
+    chosen = ranked[0]!;
   }
 
   if (chosen.alg !== ALG_ES256 && chosen.alg !== ALG_RS256) {
@@ -94,6 +107,7 @@ async function handleGet(
   }
   if (deps.signal?.aborted) return ABORTED;
   store.useCredential(chosen.id).catch(() => undefined);
+  deps.owned.remember(chosen.id).catch(() => undefined);
   return { action: "success", credential, toast: "signed-in", userName: chosen.user_name };
 }
 
@@ -145,6 +159,8 @@ async function handleCreate(
   } catch (err) {
     return { action: "error", message: `保存通行密钥失败：${describeError(err)}` };
   }
+  // Saved on the server by this profile, even if the page no longer takes the result.
+  deps.owned.remember(registration.credentialId).catch(() => undefined);
   if (deps.signal?.aborted) return ABORTED;
   return { action: "success", credential: registration.response, toast: "saved", userName: options.user.name };
 }

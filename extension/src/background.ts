@@ -4,7 +4,7 @@ import { CONFIG_KEY, type Config } from "./lib/config";
 import { handleRequest } from "./lib/handler";
 import { applyManagedConfig, MANAGED_CONFIG_FILE, readManagedConfig, sameConfig } from "./lib/managed";
 import type { BackgroundRequest, BackgroundResponse } from "./lib/protocol";
-import { loadConfig, loadSettings, saveConfig } from "./lib/storage";
+import { loadConfig, loadOwned, loadSettings, rememberOwned, saveConfig } from "./lib/storage";
 
 const tasks = new Map<string, { tabId: number; controller: AbortController }>();
 const trustedStorage = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -64,6 +64,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, reply: (response
     loadConfig,
     loadSettings,
     store: (config) => new ServerClient(config),
+    owned: { load: loadOwned, remember: rememberOwned },
     signal: controller.signal,
   })).then(reply, (error: unknown) => {
     reply({ action: "error", message: describeError(error) } satisfies BackgroundResponse);

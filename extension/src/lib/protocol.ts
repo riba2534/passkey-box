@@ -88,6 +88,8 @@ export interface CandidateSummary {
   user_name: string;
   user_display_name: string;
   rp_id: string;
+  /** Registered or used in this browser profile. */
+  owned?: boolean;
 }
 
 export type ToastKind = "signed-in" | "saved" | "exists";
