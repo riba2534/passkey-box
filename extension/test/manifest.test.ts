@@ -29,7 +29,7 @@ describe("manifest.json (CONTRACT 4.2)", () => {
   });
 
   it("referenced static files exist", () => {
-    for (const file of ["popup.html", "options.html", "device.html", "ui.css", ...Object.values<string>(manifest.icons)]) {
+    for (const file of ["popup.html", "options.html", "ui.css", ...Object.values<string>(manifest.icons)]) {
       expect(existsSync(join(staticDir, file)), file).toBe(true);
     }
     const png = readFileSync(join(staticDir, "icons/icon-128.png"));
@@ -40,6 +40,5 @@ describe("manifest.json (CONTRACT 4.2)", () => {
   it("pages load their bundles", () => {
     expect(readFileSync(join(staticDir, "popup.html"), "utf8")).toContain('src="popup.js"');
     expect(readFileSync(join(staticDir, "options.html"), "utf8")).toContain('src="options.js"');
-    expect(readFileSync(join(staticDir, "device.html"), "utf8")).toContain('src="device.js"');
   });
 });

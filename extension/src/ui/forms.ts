@@ -77,11 +77,11 @@ export function loginForm(doc: Document, opts: LoginFormOptions): HTMLFormElemen
 const SETTING_LABELS: Record<keyof Settings, { title: string; desc: string }> = {
   autoLoginSingle: {
     title: "只有一个账号时跳过选择",
-    desc: "找到唯一账号时，直接进入设备验证。",
+    desc: "找到唯一账号时，直接登录。",
   },
   conditionalAutoLogin: {
     title: "响应页面的自动填充请求",
-    desc: "当前标签页发起通行密钥自动填充请求时，进入账号选择或设备验证。",
+    desc: "当前标签页发起通行密钥自动填充请求时，显示账号选择或直接登录。",
   },
 };
 

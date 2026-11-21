@@ -45,13 +45,6 @@ export class VirtualAuthenticator {
     return new VirtualAuthenticator(session, authenticatorId);
   }
 
-  async addCredential(credential: VirtualCredential): Promise<void> {
-    await this.session.send('WebAuthn.addCredential', {
-      authenticatorId: this.authenticatorId,
-      credential,
-    });
-  }
-
   async clearResponseFlag(flag: 'UV' | 'UP'): Promise<void> {
     await this.session.send('WebAuthn.setResponseOverrideBits', {
       authenticatorId: this.authenticatorId,

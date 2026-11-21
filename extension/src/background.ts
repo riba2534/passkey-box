@@ -1,14 +1,22 @@
 import { describeError, ServerClient } from "./lib/api";
 import { isHttpOrigin } from "./lib/caller";
-import { CONFIG_KEY } from "./lib/config";
-import { DeviceVerification, isDeviceMessage } from "./lib/device-verification";
+import { CONFIG_KEY, type Config } from "./lib/config";
 import { handleRequest } from "./lib/handler";
+import { applyManagedConfig, MANAGED_CONFIG_FILE, readManagedConfig, sameConfig } from "./lib/managed";
 import type { BackgroundRequest, BackgroundResponse } from "./lib/protocol";
-import { loadConfig, loadSettings } from "./lib/storage";
+import { loadConfig, loadSettings, saveConfig } from "./lib/storage";
 
-const device = new DeviceVerification();
 const tasks = new Map<string, { tabId: number; controller: AbortController }>();
 const trustedStorage = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+let managedConfig: Config | null = null;
+// Requests wait until a managed account (managed-config.json) has been signed in.
+const ready = trustedStorage
+  .then(() => readManagedConfig(chrome.runtime.getURL(MANAGED_CONFIG_FILE)))
+  .then((config) => {
+    managedConfig = config;
+    return config && applyManagedConfig(config, { loadConfig, saveConfig });
+  })
+  .catch(() => undefined);
 
 function abortTabTasks(tabId?: number): void {
   for (const task of tasks.values()) {
@@ -21,17 +29,13 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.status === "loading" || change.url) abortTabTasks(tabId);
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && CONFIG_KEY in changes) abortTabTasks();
+  if (area !== "local" || !(CONFIG_KEY in changes)) return;
+  // Signing in with the managed account at startup must not cancel requests waiting for it.
+  if (managedConfig && sameConfig(changes[CONFIG_KEY]?.newValue, managedConfig)) return;
+  abortTabTasks();
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, reply: (response?: unknown) => void) => {
-  if (isDeviceMessage(message)) {
-    void trustedStorage.then(() => device.handle(message, sender)).then(reply, () => {
-      reply({ ok: false, error: "设备验证暂不可用，请重试。" });
-    });
-    return true;
-  }
-
   const request = message as (BackgroundRequest | { type: "pkb:abort" }) & { requestId?: string };
   if (request?.type !== "pkb:create" && request?.type !== "pkb:get" && request?.type !== "pkb:abort") return false;
   const tabId = sender.tab?.id;
@@ -56,11 +60,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, reply: (response
   const controller = new AbortController();
   tasks.set(key, { tabId, controller });
   const caller = { origin, hostname: new URL(origin).hostname, crossOrigin: false };
-  void trustedStorage.then(() => handleRequest({ ...request, caller }, {
+  void ready.then(() => handleRequest({ ...request, caller }, {
     loadConfig,
     loadSettings,
     store: (config) => new ServerClient(config),
-    authorize: (operation) => device.authorize(operation, controller.signal),
     signal: controller.signal,
   })).then(reply, (error: unknown) => {
     reply({ action: "error", message: describeError(error) } satisfies BackgroundResponse);

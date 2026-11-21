@@ -9,23 +9,6 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "dist");
 
-// Chromium hashes the serialized extension origin instead of a DNS RP ID.
-// Allow that syntax only; SimpleWebAuthn still checks the exact RP hash and signature.
-const chromiumExtensionRp = {
-  name: "chromium-extension-rp",
-  setup(build) {
-    build.onLoad({ filter: /[/\\]@simplewebauthn[/\\]server[/\\]esm[/\\]helpers[/\\]assertValidExpectedRPID\.js$/ }, async ({ path }) => {
-      const input = await readFile(path, "utf8");
-      const start = "export function assertValidExpectedRPID(rpID) {";
-      if (!input.includes(start)) throw new Error("Review the extension RP ID adapter for this SimpleWebAuthn version.");
-      return {
-        contents: input.replace(start, start + "\n    if (/^chrome-extension:\\/\\/[a-p]{32}$/.test(rpID)) return;"),
-        loader: "js",
-      };
-    });
-  },
-};
-
 const common = {
   bundle: true,
   target: "chrome120",
@@ -61,9 +44,8 @@ await Promise.all([
     entryPoints: [join(root, "src/background.ts")],
     outfile: join(dist, "background.js"),
     format: "esm",
-    plugins: [chromiumExtensionRp],
   }),
-  ...["inject", "content", "popup", "options", "device"].map((name) =>
+  ...["inject", "content", "popup", "options"].map((name) =>
     build({ ...common, entryPoints: [join(root, `src/${name}.ts`)], outfile: join(dist, `${name}.js`), format: "iife" }),
   ),
 ]);

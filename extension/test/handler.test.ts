@@ -38,7 +38,6 @@ function deps(store: MemoryStore, opts: { config?: Config | null; settings?: Par
     loadConfig: async () => (opts.config === undefined ? config : opts.config),
     loadSettings: async () => ({ autoLoginSingle: true, conditionalAutoLogin: true, ...opts.settings }),
     store: vi.fn(() => store),
-    authorize: vi.fn(async () => "verified" as const),
   };
 }
 
@@ -190,39 +189,27 @@ describe("handleRequest: create", () => {
   });
 });
 
-describe("device verification gate", () => {
-  it("does not create a credential after cancelled device verification", async () => {
+describe("handleRequest: aborted by the page", () => {
+  it("does not create a credential when the site already aborted", async () => {
     const store = new MemoryStore();
-    const authorize = vi.fn(async () => "cancelled" as const);
-    const result = await handleRequest(createReq(), { ...deps(store), authorize });
+    const controller = new AbortController();
+    controller.abort();
+    const result = await handleRequest(createReq(), { ...deps(store), signal: controller.signal });
     expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
-    expect(authorize).toHaveBeenCalledWith({ site: caller.origin, operation: "create" });
     expect(store.credentials).toHaveLength(0);
   });
 
-  it("does not sign or record use without an enrolled device", async () => {
+  it("does not sign or record use when the site already aborted", async () => {
     const store = new MemoryStore();
     await register(store, "already-registered");
-    const authorize = vi.fn(async () => "not-enrolled" as const);
-    const result = await handleRequest(getReq(), { ...deps(store), authorize });
-    expect(result).toMatchObject({ action: "error", message: expect.stringContaining("设备验证") });
-    expect(authorize).toHaveBeenCalledWith({ site: caller.origin, operation: "get" });
+    const controller = new AbortController();
+    controller.abort();
+    const result = await handleRequest(getReq(), { ...deps(store), signal: controller.signal });
+    expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
     expect(store.used).toHaveLength(0);
   });
 
-  it("discards an approval if the site aborted while verification was in progress", async () => {
-    const store = new MemoryStore();
-    const controller = new AbortController();
-    const authorize = async () => {
-      controller.abort();
-      return "verified" as const;
-    };
-    const result = await handleRequest(createReq(), { ...deps(store), authorize, signal: controller.signal });
-    expect(result).toMatchObject({ action: "reject", name: "NotAllowedError" });
-    expect(store.credentials).toHaveLength(0);
-  });
-
-  it("suppresses the response if the site aborted during the authorized write", async () => {
+  it("suppresses the response if the site aborted during the write", async () => {
     const store = new MemoryStore();
     const controller = new AbortController();
     const write = store.createCredential.bind(store);
@@ -243,7 +230,7 @@ describe("handleRequest: get", () => {
     expect(store.listCalls).toEqual(["example.com"]);
   });
 
-  it("1 candidate → authorizes, signs, records use, and verifies", async () => {
+  it("1 candidate → signs, records use, and verifies", async () => {
     const store = new MemoryStore();
     const reg = await register(store, "carol");
     const registration = await verifyRegistrationResponse({

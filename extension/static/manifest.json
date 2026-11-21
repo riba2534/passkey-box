@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Passkey Box",
-  "version": "0.2.0",
-  "description": "使用 Passkey Box 保存和同步通行密钥，并在通过设备验证后注册和登录网站。",
+  "version": "0.3.0",
+  "description": "使用 Passkey Box 保存和同步通行密钥，在网站上注册和登录。",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

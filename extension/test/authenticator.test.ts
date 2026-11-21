@@ -159,7 +159,7 @@ describe.each<[string, CoseAlgorithm]>([
   const origin = "http://localhost:18411";
 
   async function register(challenge: string, extra: { credProps?: boolean } = {}) {
-    const reg = await createRegistration({ userVerified: true, rpId, challenge, origin, crossOrigin: false, alg, ...extra });
+    const reg = await createRegistration({ rpId, challenge, origin, crossOrigin: false, alg, ...extra });
     const verification = await verifyRegistrationResponse({
       response: reg.response,
       expectedChallenge: challenge,
@@ -196,7 +196,6 @@ describe.each<[string, CoseAlgorithm]>([
     const challenge = bytesToBase64url(crypto.getRandomValues(new Uint8Array(32)));
     const userHandle = bytesToBase64url(utf8("user-1"));
     const assertion = await createAssertion({
-      userVerified: true,
       rpId,
       challenge,
       origin,
@@ -222,7 +221,6 @@ describe.each<[string, CoseAlgorithm]>([
   it("cross-origin iframe assertions carry topOrigin", async () => {
     const { reg, verification } = await register("Y2g");
     const assertion = await createAssertion({
-      userVerified: true,
       rpId,
       challenge: "Y2hhbGxlbmdl",
       origin,
@@ -249,7 +247,6 @@ describe.each<[string, CoseAlgorithm]>([
   it("a tampered signature fails verification", async () => {
     const { reg, verification } = await register("dGFtcGVy");
     const assertion = await createAssertion({
-      userVerified: true,
       rpId,
       challenge: "dGFtcGVy",
       origin,

@@ -5,7 +5,6 @@ import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlg
 import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
 import { decideGet, filterByAllowList, hasExcludedCredential, selectAlgorithm } from "./decision";
-import type { DeviceOperation, DeviceResult } from "./device-verification";
 import { requestedRpId, type BackgroundRequest, type BackgroundResponse, type CandidateSummary } from "./protocol";
 import { effectiveRpId, hostMatchesRpId } from "./rpid";
 
@@ -19,7 +18,6 @@ export interface HandlerDeps {
   loadConfig(): Promise<Config | null>;
   loadSettings(): Promise<Settings>;
   store(config: Config): CredentialStore;
-  authorize(operation: DeviceOperation): Promise<DeviceResult>;
   signal?: AbortSignal;
 }
 
@@ -27,28 +25,8 @@ const MSG_SECURITY = "The relying party ID is not a registrable domain suffix of
 const MSG_EXISTS =
   "The user attempted to register an authenticator that contains one of the credentials already registered with the relying party.";
 const MSG_ALG = "None of the requested public key algorithms are supported. Passkey Box supports ES256 (-7) and RS256 (-257).";
-const VERIFICATION_CANCELLED = {
-  action: "reject",
-  name: "NotAllowedError",
-  message: "本次设备验证未完成。",
-} as const;
-
-async function authorizeRequest(req: BackgroundRequest, deps: HandlerDeps): Promise<BackgroundResponse | undefined> {
-  if (deps.signal?.aborted) return VERIFICATION_CANCELLED;
-  const result = await deps.authorize({
-    site: req.caller.origin,
-    operation: req.type === "pkb:create" ? "create" : "get",
-  });
-  if (deps.signal?.aborted || result === "cancelled") return VERIFICATION_CANCELLED;
-  if (result === "not-enrolled") {
-    if (req.type === "pkb:get" && req.mediation === "conditional" && req.credentialId === undefined) {
-      return { action: "pending" };
-    }
-    return { action: "error", message: "请先打开 Passkey Box 设置，在「设备验证」中完成设置。" };
-  }
-  if (result !== "verified") return VERIFICATION_CANCELLED;
-  return undefined;
-}
+// The page aborted the request (AbortSignal, navigation or tab close): discard the result.
+const ABORTED = { action: "reject", name: "NotAllowedError", message: "请求已取消。" } as const;
 
 function summarize(c: Credential): CandidateSummary {
   return { id: c.id, user_name: c.user_name, user_display_name: c.user_display_name, rp_id: c.rp_id };
@@ -99,8 +77,7 @@ async function handleGet(
   if (chosen.alg !== ALG_ES256 && chosen.alg !== ALG_RS256) {
     return { action: "error", message: `不支持的算法：${chosen.alg}` };
   }
-  const blocked = await authorizeRequest(req, deps);
-  if (blocked || deps.signal?.aborted) return blocked ?? VERIFICATION_CANCELLED;
+  if (deps.signal?.aborted) return ABORTED;
   let credential;
   try {
     credential = await createAssertion({
@@ -111,12 +88,11 @@ async function handleGet(
       privateKey: chosen.private_key,
       userHandle: chosen.user_handle,
       ...req.caller,
-      userVerified: true,
     });
   } catch (err) {
     return { action: "error", message: `签名失败：${describeError(err)}` };
   }
-  if (deps.signal?.aborted) return VERIFICATION_CANCELLED;
+  if (deps.signal?.aborted) return ABORTED;
   store.useCredential(chosen.id).catch(() => undefined);
   return { action: "success", credential, toast: "signed-in", userName: chosen.user_name };
 }
@@ -142,8 +118,7 @@ async function handleCreate(
   }
   const alg = selectAlgorithm(options.pubKeyCredParams);
   if (alg === null) return { action: "reject", name: "NotSupportedError", message: MSG_ALG };
-  const blocked = await authorizeRequest(req, deps);
-  if (blocked || deps.signal?.aborted) return blocked ?? VERIFICATION_CANCELLED;
+  if (deps.signal?.aborted) return ABORTED;
 
   const registration = await createRegistration({
     rpId,
@@ -151,9 +126,8 @@ async function handleCreate(
     alg,
     credProps: options.extensions.credProps === true,
     ...req.caller,
-    userVerified: true,
   });
-  if (deps.signal?.aborted) return VERIFICATION_CANCELLED;
+  if (deps.signal?.aborted) return ABORTED;
   try {
     await store.createCredential({
       id: registration.credentialId,
@@ -171,6 +145,6 @@ async function handleCreate(
   } catch (err) {
     return { action: "error", message: `保存通行密钥失败：${describeError(err)}` };
   }
-  if (deps.signal?.aborted) return VERIFICATION_CANCELLED;
+  if (deps.signal?.aborted) return ABORTED;
   return { action: "success", credential: registration.response, toast: "saved", userName: options.user.name };
 }

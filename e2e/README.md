@@ -29,7 +29,7 @@ npx playwright test --list                    # 列出用例
 | `tests/extension/` | 扩展 + 服务端用例 |
 | `support/` | 端口与路径、进程管理、服务端 API 客户端、RP 页面对象、扩展 fixture、虚拟认证器 |
 
-扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置。配置后，fixture 在扩展自己的设备页面通过 CDP 虚拟平台认证器注册本地密钥。测试可选择自动确认、手动取消或模拟无 UV 的设备响应。网站测试页的虚拟认证器独立运行，供原生回退用例使用。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。
+扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。
 
 ## RP 页面约定
 
