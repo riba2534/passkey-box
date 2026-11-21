@@ -59,6 +59,15 @@ describe("picker dialog", () => {
     expect(dialog.querySelector('[data-pkb-action="fallback"]')!.textContent).toBe("使用其他方式");
   });
 
+  it("marks accounts registered or used in this browser", async () => {
+    const ui = createPageUI(document);
+    const choice = ui.showPicker("r1", "example.com", [{ ...candidates[0]!, owned: true }, { ...candidates[1]!, owned: false }]);
+    expect(q(ui, '[data-pkb-credential-id="cred-a"] .tag')!.textContent).toBe("本浏览器用过");
+    expect(q(ui, '[data-pkb-credential-id="cred-b"] .tag')).toBeNull();
+    q(ui, '[data-pkb-credential-id="cred-a"] .tag')!.click();
+    expect(await choice).toEqual({ kind: "select", credentialId: "cred-a" });
+  });
+
   it("clicking an account resolves the selection and removes the dialog", async () => {
     const ui = createPageUI(document);
     const choice = ui.showPicker("r1", "example.com", candidates);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "../src/lib/config";
-import { decideGet, filterByAllowList, hasExcludedCredential, selectAlgorithm } from "../src/lib/decision";
+import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "../src/lib/decision";
 import { effectiveRpId, hostMatchesRpId, isIpAddress } from "../src/lib/rpid";
 
 const on: Settings = { autoLoginSingle: true, conditionalAutoLogin: true };
@@ -40,6 +40,40 @@ describe("decideGet (conditional)", () => {
 
   it("ignores autoLoginSingle", () => {
     expect(decideGet(1, "conditional", { autoLoginSingle: false, conditionalAutoLogin: true })).toBe("auto");
+  });
+});
+
+describe("decideGet with credentials of this browser profile", () => {
+  it("one of several counts as the only candidate", () => {
+    expect(decideGet(3, undefined, on, 1)).toBe("auto");
+    expect(decideGet(3, "conditional", on, 1)).toBe("auto");
+    expect(decideGet(3, "conditional", { autoLoginSingle: false, conditionalAutoLogin: true }, 1)).toBe("auto");
+  });
+
+  it("still follows the settings", () => {
+    expect(decideGet(3, undefined, { autoLoginSingle: false, conditionalAutoLogin: true }, 1)).toBe("picker");
+    expect(decideGet(3, "conditional", { autoLoginSingle: true, conditionalAutoLogin: false }, 1)).toBe("pending");
+  });
+
+  it("none or several of them keep the picker; one candidate is unaffected", () => {
+    expect(decideGet(3, undefined, on, 0)).toBe("picker");
+    expect(decideGet(3, undefined, on, 2)).toBe("picker");
+    expect(decideGet(3, "conditional", on, 3)).toBe("picker");
+    expect(decideGet(1, undefined, on, 1)).toBe("auto");
+    expect(decideGet(1, undefined, on, 0)).toBe("auto");
+  });
+});
+
+describe("rankOwnedFirst", () => {
+  const creds = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+
+  it("puts credentials of this profile first, most recent first, keeping the rest in order", () => {
+    const owned = new Map([["c", 10], ["d", 30], ["x", 50]]);
+    expect(rankOwnedFirst(creds, owned).map((c) => c.id)).toEqual(["d", "c", "a", "b"]);
+  });
+
+  it("keeps the order without a record", () => {
+    expect(rankOwnedFirst(creds, new Map())).toEqual(creds);
   });
 });
 

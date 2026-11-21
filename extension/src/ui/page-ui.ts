@@ -36,6 +36,8 @@ const PAGE_UI_CSS = `
 .name, .user { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .name { font-weight: 600; color: #1b1f24; }
 .user { font-size: 12px; color: #6b7280; }
+.tag { flex: none; padding: 1px 6px; border-radius: 4px; background: #eef5ff; color: #0572EC; font-size: 11px; line-height: 16px; font-weight: 500; }
+.account:hover .tag, .account:focus-visible .tag { background: #fff; }
 .go { width: 16px; height: 16px; color: #9ca3af; flex: none; }
 .message { display: flex; gap: 12px; padding: 14px 16px 16px; align-items: flex-start; }
 .message-icon { width: 22px; height: 22px; flex: none; color: #6b7280; margin-top: 1px; }
@@ -166,6 +168,7 @@ export function createPageUI(doc: Document = document): PageUI {
         h(doc, "span", { class: "name" }, primary),
         display ? h(doc, "span", { class: "user" }, c.user_name) : null,
       ),
+      c.owned ? h(doc, "span", { class: "tag" }, "本浏览器用过") : null,
       icon(doc, CHEVRON, "go"),
     );
   }
