@@ -2,7 +2,7 @@
 // Each test gets a fresh persistent Chromium profile with the unpacked extension loaded,
 // a reset test RP and empty credential lists for both test accounts.
 
-import { chromium, expect, type Locator, type Page, test as base, type Worker } from '@playwright/test';
+import { type BrowserContext, chromium, expect, type Locator, type Page, test as base, type Worker } from '@playwright/test';
 import { CHROMIUM_EXECUTABLE_PATH } from './config.ts';
 import { type Account, PkbApi } from './pkb-api.ts';
 import { RpPage, rpApi } from './rp.ts';
@@ -72,6 +72,25 @@ export class PkbUi {
   }
 }
 
+// The headless shell cannot load extensions; the "chromium" channel runs full Chromium headless.
+/** A fresh browser profile (temporary user data dir) with the unpacked extension loaded. */
+export function launchProfile(stack: StackState, headless: boolean): Promise<BrowserContext> {
+  return chromium.launchPersistentContext('', {
+    channel: 'chromium',
+    executablePath: CHROMIUM_EXECUTABLE_PATH,
+    headless,
+    args: [`--disable-extensions-except=${stack.extensionDist}`, `--load-extension=${stack.extensionDist}`],
+  });
+}
+
+export async function extensionIn(context: BrowserContext, stack: StackState): Promise<PkbExtension> {
+  const isExtensionWorker = (worker: Worker) => worker.url().startsWith('chrome-extension://');
+  const worker =
+    context.serviceWorkers().find(isExtensionWorker) ??
+    (await context.waitForEvent('serviceworker', { predicate: isExtensionWorker }));
+  return new PkbExtension(worker, stack.serverUrl);
+}
+
 type Fixtures = {
   stack: StackState;
   pkb: PkbApi;
@@ -100,14 +119,8 @@ export const test = base.extend<Fixtures>({
     { auto: true },
   ],
 
-  // The headless shell cannot load extensions; the "chromium" channel runs full Chromium headless.
   context: async ({ stack, headless }, use) => {
-    const context = await chromium.launchPersistentContext('', {
-      channel: 'chromium',
-      executablePath: CHROMIUM_EXECUTABLE_PATH,
-      headless,
-      args: [`--disable-extensions-except=${stack.extensionDist}`, `--load-extension=${stack.extensionDist}`],
-    });
+    const context = await launchProfile(stack, headless);
     await use(context);
     await context.close();
   },
@@ -117,11 +130,7 @@ export const test = base.extend<Fixtures>({
   },
 
   extension: async ({ context, stack }, use) => {
-    const isExtensionWorker = (worker: Worker) => worker.url().startsWith('chrome-extension://');
-    const worker =
-      context.serviceWorkers().find(isExtensionWorker) ??
-      (await context.waitForEvent('serviceworker', { predicate: isExtensionWorker }));
-    await use(new PkbExtension(worker, stack.serverUrl));
+    await use(await extensionIn(context, stack));
   },
 
   rp: async ({ page }, use) => {
