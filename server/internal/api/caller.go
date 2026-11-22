@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -120,16 +119,8 @@ func (s *Server) authed(next authedHandler) http.HandlerFunc {
 			writeError(w, http.StatusForbidden, "read_only_token", "this API token can only read")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, c)), c)
+		next(w, r, c)
 	}
-}
-
-type callerKey struct{}
-
-// callerFrom returns the caller stored by authed, or nil.
-func callerFrom(r *http.Request) *caller {
-	c, _ := r.Context().Value(callerKey{}).(*caller)
-	return c
 }
 
 // admin requires a logged-in administrator.

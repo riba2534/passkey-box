@@ -20,10 +20,9 @@ const (
 )
 
 // userRef is a user reference in a JSON request body: a JSON number is a user
-// ID, a JSON string a username. Raw keeps the value as sent, for error items.
+// ID, a JSON string a username.
 type userRef struct {
 	Key store.UserKey
-	Raw any
 }
 
 func (u *userRef) UnmarshalJSON(b []byte) error {
@@ -33,14 +32,14 @@ func (u *userRef) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &name); err != nil {
 			return err
 		}
-		*u = userRef{Key: store.UserKey{Username: name}, Raw: name}
+		*u = userRef{Key: store.UserKey{Username: name}}
 		return nil
 	}
 	var id int64
 	if err := json.Unmarshal(b, &id); err != nil || id <= 0 {
 		return fmt.Errorf("a user is a positive ID or a username")
 	}
-	*u = userRef{Key: store.UserKey{ID: id}, Raw: id}
+	*u = userRef{Key: store.UserKey{ID: id}}
 	return nil
 }
 

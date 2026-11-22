@@ -114,17 +114,6 @@ func (s *Server) routeTable() []route {
 	}
 }
 
-// Patterns returns the ServeMux pattern of every route, for documentation
-// checks.
-func (s *Server) Patterns() []string {
-	table := s.routeTable()
-	out := make([]string, len(table))
-	for i, rt := range table {
-		out[i] = rt.pattern
-	}
-	return out
-}
-
 func (s *Server) routes() {
 	m := s.mux
 	for _, rt := range s.routeTable() {
@@ -272,11 +261,6 @@ type errorDetail struct {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
-}
-
-// notImplemented answers a route whose handler is still being written.
-func notImplemented(w http.ResponseWriter) {
-	writeError(w, http.StatusNotImplemented, "not_implemented", "not implemented yet")
 }
 
 func badRequest(w http.ResponseWriter, message string) {
