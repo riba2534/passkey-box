@@ -157,3 +157,50 @@ test('owned-only without an account: the last account follows the policy, nothin
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/** Signs the extension in through the login form on its options page. */
+async function signInOnOptions(profile: ManagedProfile, stack: StackState, account: { serverUrl: string; username: string; password: string }) {
+  const options = await openOptions(profile, stack);
+  await options.locator('#pkb-server-url').fill(account.serverUrl);
+  await options.locator('#pkb-username').fill(account.username);
+  await options.locator('#pkb-password').fill(account.password);
+  await options.locator('form.login-form button[type="submit"]').click();
+  await expect(options.locator('.status')).toContainText(`已登录 ${account.username}`);
+  await expect(options.locator('.settings-note')).toBeVisible();
+  await options.close();
+}
+
+// Profiles without a launcher account get only {"autoLogin":"owned-only"}; users who sign in to the same
+// account on the options page are kept apart all the same.
+test('owned-only policy file: accounts signed in on the options page follow it', async ({ stack, headless }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'pkb-policy-manual-'));
+  const { username, password } = stack.users.a;
+  const account = { serverUrl: stack.serverUrl, username, password };
+  const profiles: ManagedProfile[] = [];
+  const launch = async (name: string) => {
+    const profile = await launchManaged(stack, path.join(root, name), { autoLogin: 'owned-only' }, headless);
+    profiles.push(profile);
+    await signInOnOptions(profile, stack, account);
+    return profile;
+  };
+  try {
+    const a = await launch('a');
+    await a.rp.goto();
+    await a.rp.registerOk('alice');
+    await a.rp.login();
+    await a.rp.expectResult('authenticated:alice');
+    await a.ui.expectNoDialog();
+
+    const b = await launch('b');
+    await b.rp.goto({ conditional: true });
+    await expect(b.ui.dialog('picker')).toBeVisible();
+    await expect(b.rp.result).toHaveText('pending:conditional');
+    await b.rp.login();
+    await expect(b.ui.dialog('picker')).toBeVisible();
+    await expect(b.ui.pickerAccounts()).toHaveCount(1);
+    await expect(b.rp.result).toHaveText('pending:login');
+  } finally {
+    await Promise.all(profiles.map((p) => p.context.close()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
