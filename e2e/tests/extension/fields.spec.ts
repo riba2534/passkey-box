@@ -47,7 +47,8 @@ test('the popup shows custom fields: passwords hidden, a TOTP field as its curre
   await popup.goto(extension.popupUrl);
   await popup.locator(`[data-credential-id="${alice.id}"]`).click();
   await expect(popup.locator('.field-row').filter({ hasText: '网站' }).locator('dd')).toHaveText('localhost');
-  if (!extensionSince(stack, '0.7.0')) return;
+  // An older extension got this far with the fields in every response; the rest is 0.7.0 UI.
+  test.skip(!extensionSince(stack, '0.7.0'), 'extensions before 0.7.0 do not show custom fields');
 
   const rows = popup.locator('.custom-fields .field-row');
   const value = (i: number) => rows.nth(i).locator('.field-value');
