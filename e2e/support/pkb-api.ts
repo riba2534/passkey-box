@@ -70,8 +70,12 @@ export class PkbApi {
     await this.request(account, 'DELETE', `/api/v1/credentials/${encodeURIComponent(id)}`);
   }
 
-  async clearCredentials(account: Account): Promise<void> {
-    const credentials = await this.listCredentials(account);
-    await Promise.all(credentials.map((c) => this.deleteCredential(account, c.id)));
+  /** Deletes every credential on the server, whoever owns it, with their shares. */
+  async clearAllCredentials(admin: Account): Promise<void> {
+    for (;;) {
+      const { credentials } = await this.request<{ credentials: Credential[] }>(admin, 'GET', '/api/v1/admin/credentials?limit=500');
+      if (credentials.length === 0) return;
+      await this.request(admin, 'POST', '/api/v1/admin/credentials/batch-delete', { ids: credentials.map((c) => c.id) });
+    }
   }
 }

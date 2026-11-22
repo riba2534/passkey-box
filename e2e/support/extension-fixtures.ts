@@ -1,6 +1,6 @@
 // Fixtures for specs that drive the real Passkey Box extension against the real server.
 // Each test gets a fresh persistent Chromium profile with the unpacked extension loaded,
-// a reset test RP and empty credential lists for both test accounts.
+// a reset test RP and a server without any credentials.
 
 import { type BrowserContext, chromium, expect, type Locator, type Page, test as base, type Worker } from '@playwright/test';
 import { CHROMIUM_EXECUTABLE_PATH } from './config.ts';
@@ -113,7 +113,8 @@ export const test = base.extend<Fixtures>({
 
   cleanState: [
     async ({ stack, pkb }, use) => {
-      await Promise.all([rpApi.reset(), pkb.clearCredentials(stack.users.a), pkb.clearCredentials(stack.users.b)]);
+      // Shares and transfers move credentials between accounts, so clear the whole server as administrator.
+      await Promise.all([rpApi.reset(), pkb.clearAllCredentials(stack.admin)]);
       await use();
     },
     { auto: true },
