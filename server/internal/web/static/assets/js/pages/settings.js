@@ -1,6 +1,6 @@
 // 账户设置: the signed-in user's account and password.
 
-import { state, h, api, errText, toast, refreshMe, field, formRow, roleText, fmtDateTime } from '../core.js';
+import { state, h, api, errText, toast, refreshMe, singlePage, field, formRow, roleText, fmtDateTime } from '../core.js';
 
 export default {
   id: 'settings',
@@ -37,23 +37,19 @@ function renderSettingsPage() {
     }
   };
 
-  return h('div', { class: 'page single' },
-    h('div', { class: 'content' },
-      h('div', { class: 'content-inner' },
-        h('h1', { class: 'page-title' }, '账户设置'),
-        h('p', { class: 'page-sub' }, '查看账户信息并修改登录密码。'),
-        h('h3', { class: 'section-title' }, '账户'),
-        h('div', { class: 'card' },
-          field('用户名', me.username),
-          field('角色', roleText(me)),
-          field('通行密钥', `${me.credential_count} 个`),
-          field('创建时间', fmtDateTime(me.created_at))),
-        h('h3', { class: 'section-title' }, '修改密码'),
-        h('form', { class: 'card form-card', onsubmit: onSubmit, novalidate: true },
-          h('input', { type: 'text', autocomplete: 'username', value: me.username, hidden: true, readonly: true }),
-          formRow('当前密码', old),
-          formRow('新密码', next),
-          formRow('确认新密码', confirm),
-          error,
-          h('div', { class: 'form-actions' }, submit)))));
+  return singlePage('账户设置', '查看账户信息并修改登录密码。',
+    h('h3', { class: 'section-title' }, '账户'),
+    h('div', { class: 'card' },
+      field('用户名', me.username),
+      field('角色', roleText(me)),
+      field('通行密钥', `${me.credential_count} 个`),
+      field('创建时间', fmtDateTime(me.created_at))),
+    h('h3', { class: 'section-title' }, '修改密码'),
+    h('form', { class: 'card form-card', onsubmit: onSubmit, novalidate: true },
+      h('input', { type: 'text', autocomplete: 'username', value: me.username, hidden: true, readonly: true }),
+      formRow('当前密码', old),
+      formRow('新密码', next),
+      formRow('确认新密码', confirm),
+      error,
+      h('div', { class: 'form-actions' }, submit)));
 }

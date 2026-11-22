@@ -86,6 +86,11 @@ const ICONS = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  clipboard: '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
 };
 
 export function icon(name) {
@@ -412,6 +417,17 @@ export function formDialog({ title, intro, fields, submitText, onSubmit }) {
 /* ------------------------------------------------------------------ */
 /* Small widgets                                                       */
 /* ------------------------------------------------------------------ */
+
+// singlePage lays out a page without a list pane: the title (narrow
+// screens show it in the top bar instead), an optional intro and content.
+export function singlePage(title, intro, ...children) {
+  return h('div', { class: 'page single' },
+    h('div', { class: 'content' },
+      h('div', { class: 'content-inner' },
+        h('h1', { class: 'page-title' }, title),
+        intro ? h('p', { class: 'page-sub' }, intro) : null,
+        children)));
+}
 
 export function emptyState(iconName, title, text, action) {
   return h('div', { class: 'empty' },

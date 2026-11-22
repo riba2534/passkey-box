@@ -5,7 +5,12 @@ import {
   closeModal, refreshMe, resetData, formRow, usernameError, roleText, installShell, go,
 } from './core.js';
 import passkeys from './pages/passkeys.js';
+import activity from './pages/activity.js';
+import overview from './pages/overview.js';
 import users from './pages/users.js';
+import credentials from './pages/credentials.js';
+import audit from './pages/audit.js';
+import agent from './pages/agent.js';
 import install from './pages/install.js';
 import settings from './pages/settings.js';
 
@@ -36,10 +41,12 @@ import settings from './pages/settings.js';
  * @property {() => void} [reset]   Drops cached data on sign-in, sign-out and session loss.
  */
 
-// The sidebar: a group without a label is the main navigation.
+// The sidebar: a group without a label is the main navigation. A group
+// whose pages are all hidden from the user is left out.
 const NAV = [
-  { pages: [passkeys, users] },
-  { label: '设置', pages: [install, settings] },
+  { pages: [passkeys, activity] },
+  { label: '管理', pages: [overview, users, credentials, audit] },
+  { label: '设置', pages: [agent, install, settings] },
 ];
 
 const PAGES = new Map(NAV.flatMap((g) => g.pages).map((p) => [p.id, p]));
