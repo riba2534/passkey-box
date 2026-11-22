@@ -4,30 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Credential } from "../src/lib/api";
 import { CONFIG_KEY } from "../src/lib/config";
-import { fakeFetch, json } from "./fixtures";
+import { cred, fakeFetch, json } from "./fixtures";
 
 const config = { serverUrl: "https://pk.example.com", username: "alice", password: "pw" };
-
-function cred(over: Partial<Credential>): Credential {
-  return {
-    id: "id",
-    rp_id: "example.com",
-    rp_name: "",
-    user_handle: "aA",
-    user_name: "user",
-    user_display_name: "",
-    alg: -7,
-    private_key: "",
-    public_key: "",
-    sign_count: 0,
-    label: "",
-    origin: "",
-    created_at: "2026-11-20T03:30:00Z",
-    last_used_at: null,
-    use_count: 0,
-    ...over,
-  };
-}
 
 const own = cred({ id: "own", rp_name: "GitHub", user_name: "alice-gh", owner: { id: 1, username: "alice" }, access: "owner", shared_at: null });
 const shared = cred({ id: "in", rp_name: "Figma", user_name: "team@example.com", owner: { id: 2, username: "bob" }, access: "shared", shared_at: "2026-11-21T00:00:00Z" });

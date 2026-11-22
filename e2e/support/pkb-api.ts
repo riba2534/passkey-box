@@ -54,8 +54,8 @@ export type TransferResult = {
   warnings: string[];
 };
 
-/** Sharing and transfers as the owner (`/credentials/*`) or as an administrator (`/admin/credentials/*`). */
-export type Scope = 'owner' | 'admin';
+/** Transfers as the owner (`/credentials/*`) or as an administrator (`/admin/credentials/*`). */
+type Scope = 'owner' | 'admin';
 const credentialsPath = (scope: Scope) => (scope === 'admin' ? '/api/v1/admin/credentials' : '/api/v1/credentials');
 
 export class PkbApi {
@@ -100,18 +100,12 @@ export class PkbApi {
     return (await this.request<{ credential: Credential }>(account, 'GET', path)).credential;
   }
 
-  /** Deletes an owned credential; for a shared one, leaves the share. */
-  async deleteCredential(account: Account, id: string): Promise<void> {
-    await this.request(account, 'DELETE', `/api/v1/credentials/${encodeURIComponent(id)}`);
+  async share(account: Account, ids: string[], users: UserRef[]): Promise<Batch<ShareResult>> {
+    return this.request(account, 'POST', '/api/v1/credentials/share', { ids, users });
   }
 
-  async share(account: Account, ids: string[], users: UserRef[], scope: Scope = 'owner'): Promise<Batch<ShareResult>> {
-    return this.request(account, 'POST', `${credentialsPath(scope)}/share`, { ids, users });
-  }
-
-  async unshare(account: Account, ids: string[], users: UserRef[] | 'all', scope: Scope = 'owner'): Promise<Batch<ShareResult>> {
-    const body = users === 'all' ? { ids, all: true } : { ids, users };
-    return this.request(account, 'POST', `${credentialsPath(scope)}/unshare`, body);
+  async unshare(account: Account, ids: string[], users: UserRef[]): Promise<Batch<ShareResult>> {
+    return this.request(account, 'POST', '/api/v1/credentials/unshare', { ids, users });
   }
 
   async transfer(

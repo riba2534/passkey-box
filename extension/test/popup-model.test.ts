@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { Credential } from "../src/lib/api";
 import {
   accountName,
   credentialTitle,
@@ -13,27 +12,7 @@ import {
   siteUrl,
   tabHostname,
 } from "../src/lib/popup-model";
-
-function cred(over: Partial<Credential>): Credential {
-  return {
-    id: "id",
-    rp_id: "example.com",
-    rp_name: "",
-    user_handle: "aA",
-    user_name: "user",
-    user_display_name: "",
-    alg: -7,
-    private_key: "",
-    public_key: "",
-    sign_count: 0,
-    label: "",
-    origin: "",
-    created_at: "2026-11-20T03:30:00Z",
-    last_used_at: null,
-    use_count: 0,
-    ...over,
-  };
-}
+import { cred } from "./fixtures";
 
 describe("popup model", () => {
   const list = [

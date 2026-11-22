@@ -1,4 +1,4 @@
-import { expect, openProfile, type PkbExtension, type Profile, test } from '../../support/extension-fixtures.ts';
+import { expect, inProfile, type PkbExtension, test } from '../../support/extension-fixtures.ts';
 import type { Credential, PkbApi, TestUser } from '../../support/pkb-api.ts';
 import type { RpPage } from '../../support/rp.ts';
 import { extensionSince, type StackState } from '../../support/stack.ts';
@@ -18,22 +18,6 @@ async function registerAlice({ extension, stack, rp, pkb }: { extension: PkbExte
   const saved = await pkb.listCredentials(stack.users.a);
   expect(saved).toHaveLength(1);
   return saved[0] as Credential;
-}
-
-/** Runs `use` in another browser profile signed in as `account`, then closes it. */
-async function inProfile(
-  stack: StackState,
-  account: TestUser,
-  headless: boolean,
-  use: (profile: Profile) => Promise<void>,
-  settings: { autoLoginSingle?: boolean } = {},
-): Promise<void> {
-  const profile = await openProfile(stack, account, headless, settings);
-  try {
-    await use(profile);
-  } finally {
-    await profile.context.close();
-  }
 }
 
 test('a passkey shared with another user signs that user in', async ({ extension, stack, rp, pkb, headless }) => {

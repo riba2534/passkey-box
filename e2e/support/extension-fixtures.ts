@@ -74,7 +74,7 @@ export class PkbUi {
 
 // The headless shell cannot load extensions; the "chromium" channel runs full Chromium headless.
 /** A fresh browser profile (temporary user data dir) with the unpacked extension loaded. */
-export function launchProfile(stack: StackState, headless: boolean): Promise<BrowserContext> {
+function launchProfile(stack: StackState, headless: boolean): Promise<BrowserContext> {
   return chromium.launchPersistentContext('', {
     channel: 'chromium',
     executablePath: CHROMIUM_EXECUTABLE_PATH,
@@ -107,6 +107,22 @@ export async function openProfile(
   const rp = new RpPage(page);
   await rp.goto();
   return { context, extension, rp, ui: new PkbUi(page) };
+}
+
+/** Runs `use` in another browser profile signed in as `account` (see openProfile), then closes it. */
+export async function inProfile(
+  stack: StackState,
+  account: Account,
+  headless: boolean,
+  use: (profile: Profile) => Promise<void>,
+  settings: Partial<PkbSettings> = {},
+): Promise<void> {
+  const profile = await openProfile(stack, account, headless, settings);
+  try {
+    await use(profile);
+  } finally {
+    await profile.context.close();
+  }
 }
 
 type Fixtures = {
