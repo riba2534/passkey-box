@@ -63,6 +63,30 @@ func resolveUser(ctx context.Context, q queryer, key UserKey) (User, error) {
 	return scanUser(q.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.username_key = ?`, nameKey))
 }
 
+// userBrief returns the ID and name of a user, or ErrNotFound.
+func userBrief(ctx context.Context, q queryer, id int64) (UserBrief, error) {
+	return scanUserBrief(q.QueryRowContext(ctx, `SELECT id, username FROM users WHERE id = ?`, id))
+}
+
+// scanUserBrief scans a user's ID and name.
+func scanUserBrief(r rowScanner) (UserBrief, error) {
+	var u UserBrief
+	err := r.Scan(&u.ID, &u.Username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UserBrief{}, ErrNotFound
+	}
+	return u, err
+}
+
+// execCount runs a statement on q and returns the number of rows it changed.
+func execCount(ctx context.Context, q queryer, query string, args ...any) (int64, error) {
+	res, err := q.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // InvalidError reports a request the store refuses for the given reason.
 type InvalidError struct{ Reason string }
 

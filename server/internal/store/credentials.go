@@ -431,7 +431,7 @@ func (s *Store) setLabel(ctx context.Context, actor Actor, label string, now tim
 			}
 			if err := writeAudit(ctx, tx, now, actor, AuditEntry{Action: "credential.update",
 				Subject: &c.Owner, Credential: c.audit(),
-				Detail: map[string]any{"label": map[string]string{"from": c.Label, "to": label}}}); err != nil {
+				Detail: map[string]any{"label": fromTo{c.Label, label}}}); err != nil {
 				return err
 			}
 			c.Label = label
@@ -520,14 +520,4 @@ func removeAccess(ctx context.Context, q queryer, actor Actor, c Credential, use
 		return "", err
 	}
 	return StatusLeft, nil
-}
-
-// userBrief returns the ID and name of a user.
-func userBrief(ctx context.Context, q queryer, id int64) (UserBrief, error) {
-	var u UserBrief
-	err := q.QueryRowContext(ctx, `SELECT id, username FROM users WHERE id = ?`, id).Scan(&u.ID, &u.Username)
-	if errors.Is(err, sql.ErrNoRows) {
-		return UserBrief{}, ErrNotFound
-	}
-	return u, err
 }

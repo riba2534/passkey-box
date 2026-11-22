@@ -267,16 +267,7 @@ func (s *Store) CreateUser(ctx context.Context, username, password string, isAdm
 
 // GetUser returns the user with the given ID.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.id = ?`, id))
-}
-
-// GetUserByUsername returns the user with the given name (case-insensitive).
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	_, key, ok := NormalizeUsername(username)
-	if !ok {
-		return User{}, ErrNotFound
-	}
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.username_key = ?`, key))
+	return resolveUser(ctx, s.db, UserKey{ID: id})
 }
 
 // UserFilter selects users for ListUsers. Zero fields do not filter.
@@ -364,7 +355,7 @@ func (s *Store) EnsureAdmin(ctx context.Context, username, password string, now 
 	if _, _, ok := NormalizeUsername(username); !ok {
 		return false, fmt.Errorf("invalid admin username %q", username)
 	}
-	user, err := s.GetUserByUsername(ctx, username)
+	user, err := resolveUser(ctx, s.db, UserKey{Username: username})
 	switch {
 	case err == nil:
 		_, err = s.UpdateUser(ctx, SystemActor, user.ID, UserUpdate{IsAdmin: new(true)}, now)

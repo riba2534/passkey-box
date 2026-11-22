@@ -85,7 +85,7 @@ func (s *Store) CreateToken(ctx context.Context, actor Actor, userID int64, name
 	}
 	var token APIToken
 	err = s.inTx(ctx, false, func(tx *sql.Tx) error {
-		user, err := resolveUser(ctx, tx, UserKey{ID: userID})
+		subject, err := userBrief(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,6 @@ func (s *Store) CreateToken(ctx context.Context, actor Actor, userID int64, name
 		if token, err = scanToken(tx.QueryRowContext(ctx, `SELECT `+tokenColumns+` FROM api_tokens WHERE id = ?`, id)); err != nil {
 			return err
 		}
-		subject := user.Brief()
 		return writeAudit(ctx, tx, now, actor, AuditEntry{Action: "token.create", Subject: &subject,
 			Detail: map[string]any{"name": name, "read_only": readOnly}})
 	})
@@ -132,14 +131,13 @@ func (s *Store) DeleteToken(ctx context.Context, actor Actor, userID, tokenID in
 		if err != nil {
 			return err
 		}
-		user, err := resolveUser(ctx, tx, UserKey{ID: userID})
+		subject, err := userBrief(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = ?`, tokenID); err != nil {
 			return err
 		}
-		subject := user.Brief()
 		return writeAudit(ctx, tx, now, actor, AuditEntry{Action: "token.revoke", Subject: &subject,
 			Detail: map[string]any{"name": token.Name, "read_only": token.ReadOnly}})
 	})
@@ -177,25 +175,19 @@ func (s *Store) TokenUser(ctx context.Context, secret string, now time.Time) (Us
 // and with it HTTP Basic access, is unchanged.
 func (s *Store) RevokeAccess(ctx context.Context, actor Actor, userID int64, now time.Time) (sessions, tokens int, err error) {
 	err = s.inTx(ctx, false, func(tx *sql.Tx) error {
-		user, err := resolveUser(ctx, tx, UserKey{ID: userID})
+		subject, err := userBrief(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
-		count := func(query string) (int, error) {
-			res, err := tx.ExecContext(ctx, query, userID)
-			if err != nil {
-				return 0, err
-			}
-			n, err := res.RowsAffected()
-			return int(n), err
-		}
-		if sessions, err = count(`DELETE FROM sessions WHERE user_id = ?`); err != nil {
+		ns, err := execCount(ctx, tx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+		if err != nil {
 			return err
 		}
-		if tokens, err = count(`DELETE FROM api_tokens WHERE user_id = ?`); err != nil {
+		nt, err := execCount(ctx, tx, `DELETE FROM api_tokens WHERE user_id = ?`, userID)
+		if err != nil {
 			return err
 		}
-		subject := user.Brief()
+		sessions, tokens = int(ns), int(nt)
 		return writeAudit(ctx, tx, now, actor, AuditEntry{Action: "user.revoke_sessions", Subject: &subject,
 			Detail: map[string]any{"sessions": sessions, "tokens": tokens}})
 	})

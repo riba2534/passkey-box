@@ -423,7 +423,7 @@ func (s *Store) DeleteUsers(ctx context.Context, actor Actor, keys []UserKey, re
 			case deleting[user.ID]:
 				err = Invalid("the recipient is being deleted")
 			case user.Disabled:
-				err = Invalid("user is disabled")
+				err = Invalid(warnUserDisabled)
 			}
 			if err != nil {
 				if err := addUserErr(&be, "transfer_credentials_to", 0, recipient.value(), err); err != nil {
@@ -451,10 +451,7 @@ func (s *Store) DeleteUsers(ctx context.Context, actor Actor, keys []UserKey, re
 
 // Directory returns every active user, ordered by username ignoring case.
 func (s *Store) Directory(ctx context.Context) ([]UserBrief, error) {
-	return queryRows(ctx, s.db, func(r rowScanner) (UserBrief, error) {
-		var u UserBrief
-		return u, r.Scan(&u.ID, &u.Username)
-	}, `SELECT id, username FROM users WHERE disabled = 0 ORDER BY username_key`)
+	return queryRows(ctx, s.db, scanUserBrief, `SELECT id, username FROM users WHERE disabled = 0 ORDER BY username_key`)
 }
 
 // Overview summarises users, credentials and sites for the administrators.

@@ -124,14 +124,6 @@ func (b CredentialBatch) credentials(ctx context.Context, q queryer, r reach, be
 	return out, nil
 }
 
-// refValue is a user reference as the client sent it, for error entries.
-func refValue(k UserKey) any {
-	if k.ID != 0 {
-		return k.ID
-	}
-	return k.Username
-}
-
 // resolveUsers loads the users keys refers to, one entry per key. Unknown and
 // repeated users are recorded in be under field and left nil.
 func resolveUsers(ctx context.Context, q queryer, field string, keys []UserKey, be *BatchError) ([]*User, error) {
@@ -139,14 +131,13 @@ func resolveUsers(ctx context.Context, q queryer, field string, keys []UserKey, 
 	seen := make(map[int64]bool, len(keys))
 	for i, k := range keys {
 		u, err := resolveUser(ctx, q, k)
+		if err == nil && seen[u.ID] {
+			err = errDuplicate
+		}
 		if err != nil {
-			if err := be.AddErr(field, i, refValue(k), err, "user not found"); err != nil {
+			if err := be.AddErr(field, i, k.value(), err, "user not found"); err != nil {
 				return nil, err
 			}
-			continue
-		}
-		if seen[u.ID] {
-			be.Add(field, i, refValue(k), CodeInvalid, "duplicate item")
 			continue
 		}
 		seen[u.ID] = true
@@ -168,11 +159,8 @@ func actorRef(a Actor) sql.NullInt64 { return sql.NullInt64{Int64: a.ID, Valid: 
 // removeShare deletes the share of c with user and records action; it reports
 // false when there was no such share.
 func removeShare(ctx context.Context, q queryer, actor Actor, c Credential, user UserBrief, action string, now time.Time) (bool, error) {
-	res, err := q.ExecContext(ctx, `DELETE FROM credential_shares WHERE credential_seq = ? AND user_id = ?`, c.seq, user.ID)
-	if err != nil {
-		return false, err
-	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
+	n, err := execCount(ctx, q, `DELETE FROM credential_shares WHERE credential_seq = ? AND user_id = ?`, c.seq, user.ID)
+	if err != nil || n == 0 {
 		return false, err
 	}
 	return true, writeAudit(ctx, q, now, actor, AuditEntry{Action: action, Subject: &c.Owner, Target: &user, Credential: c.audit()})
@@ -203,18 +191,14 @@ func (s *Store) ShareCredentials(ctx context.Context, b CredentialBatch, users [
 				}
 				if u.ID == c.Owner.ID {
 					if !ownerReported[j] {
-						be.Add("users", j, refValue(users[j]), CodeInvalid, "user owns this credential")
+						be.Add("users", j, users[j].value(), CodeInvalid, "user owns this credential")
 						ownerReported[j] = true
 					}
 					continue
 				}
-				res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO credential_shares
+				n, err := execCount(ctx, tx, `INSERT OR IGNORE INTO credential_shares
 					(credential_seq, user_id, shared_by, created_at) VALUES (?, ?, ?, ?)`,
 					c.seq, u.ID, actorRef(b.Actor), toMillis(b.Now))
-				if err != nil {
-					return err
-				}
-				n, err := res.RowsAffected()
 				if err != nil {
 					return err
 				}
@@ -266,10 +250,7 @@ func (s *Store) UnshareCredentials(ctx context.Context, b CredentialBatch, users
 				continue
 			}
 			if all {
-				if targets, err = queryRows(ctx, tx, func(r rowScanner) (UserBrief, error) {
-					var u UserBrief
-					return u, r.Scan(&u.ID, &u.Username)
-				}, `SELECT u.id, u.username FROM credential_shares s JOIN users u ON u.id = s.user_id
+				if targets, err = queryRows(ctx, tx, scanUserBrief, `SELECT u.id, u.username FROM credential_shares s JOIN users u ON u.id = s.user_id
 					WHERE s.credential_seq = ? ORDER BY s.created_at, s.rowid`, c.seq); err != nil {
 					return err
 				}
@@ -308,7 +289,7 @@ func (s *Store) TransferCredentials(ctx context.Context, b CredentialBatch, to U
 		}
 		target, err := resolveUser(ctx, tx, to)
 		if err != nil {
-			if err := be.AddErr("to", 0, refValue(to), err, "user not found"); err != nil {
+			if err := be.AddErr("to", 0, to.value(), err, "user not found"); err != nil {
 				return err
 			}
 			return be.Err()

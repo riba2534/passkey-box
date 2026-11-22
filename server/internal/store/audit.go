@@ -69,7 +69,6 @@ func writeAudit(ctx context.Context, q queryer, now time.Time, actor Actor, e Au
 		}
 		return sql.NullInt64{Int64: u.ID, Valid: true}, u.Username
 	}
-	actorID := sql.NullInt64{Int64: actor.ID, Valid: actor.ID != 0}
 	subjectID, subjectName := ref(e.Subject)
 	targetID, targetName := ref(e.Target)
 	var credID, rpID, account string
@@ -80,7 +79,7 @@ func writeAudit(ctx context.Context, q queryer, now time.Time, actor Actor, e Au
 		(at, actor_id, actor_name, via, action, subject_id, subject_name, target_id, target_name,
 		 credential_id, rp_id, account, detail)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		toMillis(now), actorID, actor.Name, actor.Via, e.Action, subjectID, subjectName, targetID, targetName,
+		toMillis(now), actorRef(actor), actor.Name, actor.Via, e.Action, subjectID, subjectName, targetID, targetName,
 		credID, rpID, account, string(detail))
 	return err
 }
