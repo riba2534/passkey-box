@@ -29,7 +29,7 @@ PKB_E2E_EXTENSION_DIR=/tmp/ext-e2e/v050/extension/dist npx playwright test --pro
 git worktree remove /tmp/ext-e2e/v050
 ```
 
-用例用 `extensionSince(stack, '<版本>')` 按这个目录里 `manifest.json` 的版本判断扩展有哪些界面，只在版本够新时断言新界面的文案。不设置这个变量时测试的是 `extension/` 的当前代码，无论它的版本号是多少。
+用例用 `extensionSince(stack, '<版本>')` 按这个目录里 `manifest.json` 的版本判断扩展有哪些界面，只在版本够新时断言新界面的文案：`sharing.spec.ts` 对 0.6.0 起才有的「共享自 …」标签、「所有者」和「移除共享」这样处理，旧版扩展照样跑登录、共享、转移和退出共享的流程（旧版弹窗的「删除」对共享来的凭据同样只是退出共享）。不设置这个变量时测试的是 `extension/` 的当前代码，无论它的版本号是多少。
 
 ## 结构
 
@@ -42,7 +42,7 @@ git worktree remove /tmp/ext-e2e/v050
 | `tests/extension/` | 扩展 + 服务端用例 |
 | `support/` | 端口与路径、进程管理、服务端 API 客户端、RP 页面对象、扩展 fixture、虚拟认证器 |
 
-扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并用管理员接口删除服务端的全部凭据（共享和转移会让凭据跨账号，所以不按账号逐个删）。模拟多个浏览器 Profile 的用例用 `launchProfile` 和 `extensionIn` 另开独立上下文；预置账号的用例（`managed.spec.ts`）像 AnyBrowser 那样为每个上下文复制一份扩展并写入 `managed-config.json`。
+扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并用管理员接口删除服务端的全部凭据（共享和转移会让凭据跨账号，所以不按账号逐个删）。模拟多个浏览器 Profile 或多个用户的用例用 `openProfile` 另开独立上下文（`sharing.spec.ts` 里 A、B 两个用户各用一个 Profile）；预置账号的用例（`managed.spec.ts`）像 AnyBrowser 那样为每个上下文复制一份扩展并写入 `managed-config.json`。
 
 ## RP 页面约定
 

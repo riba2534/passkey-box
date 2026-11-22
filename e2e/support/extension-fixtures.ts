@@ -91,6 +91,24 @@ export async function extensionIn(context: BrowserContext, stack: StackState): P
   return new PkbExtension(worker, stack.serverUrl);
 }
 
+export type Profile = { context: BrowserContext; extension: PkbExtension; rp: RpPage; ui: PkbUi };
+
+/** Another browser profile, its extension signed in to `account`, on the test RP. */
+export async function openProfile(
+  stack: StackState,
+  account: Account,
+  headless: boolean,
+  settings: Partial<PkbSettings> = {},
+): Promise<Profile> {
+  const context = await launchProfile(stack, headless);
+  const extension = await extensionIn(context, stack);
+  await extension.configure(account, settings);
+  const page = context.pages()[0] ?? (await context.newPage());
+  const rp = new RpPage(page);
+  await rp.goto();
+  return { context, extension, rp, ui: new PkbUi(page) };
+}
+
 type Fixtures = {
   stack: StackState;
   pkb: PkbApi;
