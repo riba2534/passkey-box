@@ -94,4 +94,15 @@ describe("ServerClient", () => {
       "服务器返回错误（500）：db locked",
     );
   });
+
+  it("explains a disabled account; other 403s stay generic", async () => {
+    const disabled = fakeFetch(() => json(403, { error: { code: "account_disabled", message: "account is disabled" } }));
+    expect(describeError(await new ServerClient(config, disabled.fn).listCredentials().catch((e: unknown) => e))).toBe(
+      "账户已被停用，请联系管理员",
+    );
+    const forbidden = fakeFetch(() => json(403, { error: { code: "forbidden", message: "not the owner" } }));
+    expect(describeError(await new ServerClient(config, forbidden.fn).me().catch((e: unknown) => e))).toBe(
+      "服务器返回错误（403）：not the owner",
+    );
+  });
 });

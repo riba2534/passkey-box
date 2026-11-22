@@ -132,6 +132,7 @@ export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 0) return `无法连接服务器：${err.message}`;
     if (err.status === 401) return "用户名或密码错误";
+    if (err.status === 403 && err.code === "account_disabled") return "账户已被停用，请联系管理员";
     if (err.status === 404 && err.code !== "not_found") return "服务器地址不正确（接口不存在）";
     return `服务器返回错误（${err.status}）：${err.message}`;
   }
