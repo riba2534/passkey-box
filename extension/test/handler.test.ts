@@ -675,8 +675,9 @@ describe("handleRequest: owned-only policy", () => {
   });
 });
 
-// Since 0.6.0 GET /credentials also returns passkeys other users shared with the caller. They sign in
-// exactly like the caller's own; only the picker names their owner.
+// Since 0.6.0 GET /credentials also returns passkeys other users shared with the caller, and the picker names
+// their owner. Sharing needs no consent, so anyone can share their own account for a site with the user: such a
+// passkey never signs in by itself until the user picked it once in this browser profile (login CSRF).
 describe("handleRequest: passkeys shared by other users", () => {
   const signedInAs = (res: unknown) => (res as { userName?: string }).userName;
   const pickerOf = (res: unknown) => (res as { candidates: Array<Record<string, unknown>> }).candidates;
@@ -711,16 +712,62 @@ describe("handleRequest: passkeys shared by other users", () => {
     expect(JSON.stringify(res)).not.toContain("private_key");
   });
 
-  it("the only candidate signs in, records its use and is remembered, like an own passkey", async () => {
+  it("the only candidate asks first, also on page load; once chosen it signs in by itself", async () => {
     const store = new MemoryStore();
     const profile = new MemoryProfile();
     const dan = await register(store, "dan");
     setAccess(store, dan.id, "shared", "erin");
-    expect(signedInAs(await handleRequest(getReq(), deps(store, { profile })))).toBe("dan");
+    const conditional = getReq(getOptions(), { mediation: "conditional" });
+    for (const req of [getReq(), conditional]) {
+      const res = await handleRequest(req, deps(store, { profile }));
+      expect(res.action).toBe("picker");
+      expect(pickerOf(res)).toEqual([expect.objectContaining({ id: dan.id, owned: false, shared_by: "erin" })]);
+    }
+    expect(store.used).toEqual([]);
+
+    expect(signedInAs(await handleRequest(getReq(getOptions(), { credentialId: dan.id }), deps(store, { profile })))).toBe("dan");
     await profile.settled();
     expect(store.used).toEqual([dan.id]);
     expect([...profile.owned.keys()]).toEqual([dan.id]);
-    expect(signedInAs(await handleRequest(getReq(getOptions(), { mediation: "conditional" }), deps(store)))).toBe("dan");
+    expect(signedInAs(await handleRequest(getReq(), deps(store, { profile })))).toBe("dan");
+    expect(signedInAs(await handleRequest(conditional, deps(store, { profile })))).toBe("dan");
+    // Another profile has not chosen it.
+    expect((await handleRequest(conditional, deps(store))).action).toBe("picker");
+  });
+
+  it("a username-first login with only the shared passkey asks too", async () => {
+    const store = new MemoryStore();
+    const dan = await register(store, "dan");
+    setAccess(store, dan.id, "shared", "erin");
+    const allow = getReq(getOptions({ allowCredentials: [{ type: "public-key", id: dan.id }] }));
+    expect((await handleRequest(allow, deps(store))).action).toBe("picker");
+  });
+
+  it("an own passkey used here still signs in by itself next to a new shared one", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    const mine = await register(store, "mine", -7, profile);
+    const theirs = await register(store, "theirs");
+    setAccess(store, mine.id, "owner", "me");
+    setAccess(store, theirs.id, "shared", "mallory");
+    expect(signedInAs(await handleRequest(getReq(), deps(store, { profile })))).toBe("mine");
+    expect(signedInAs(await handleRequest(getReq(getOptions(), { mediation: "conditional" }), deps(store, { profile })))).toBe("mine");
+    // Without the record, or with automatic sign-in off, the user chooses.
+    expect((await handleRequest(getReq(), deps(store))).action).toBe("picker");
+    expect((await handleRequest(getReq(), deps(store, { profile, settings: { autoLoginSingle: false } }))).action).toBe("picker");
+  });
+
+  it("own passkeys and old servers keep signing in by themselves", async () => {
+    const store = new MemoryStore();
+    const own = await register(store, "own");
+    setAccess(store, own.id, "owner", "me");
+    expect(signedInAs(await handleRequest(getReq(), deps(store)))).toBe("own");
+    expect(signedInAs(await handleRequest(getReq(getOptions(), { mediation: "conditional" }), deps(store)))).toBe("own");
+
+    const legacy = new MemoryStore();
+    await register(legacy, "legacy");
+    expect(signedInAs(await handleRequest(getReq(), deps(legacy)))).toBe("legacy");
+    expect(signedInAs(await handleRequest(getReq(getOptions(), { mediation: "conditional" }), deps(legacy)))).toBe("legacy");
   });
 
   it("follows the profile record and the owned-only policy like an own passkey", async () => {

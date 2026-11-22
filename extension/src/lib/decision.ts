@@ -36,6 +36,15 @@ export function decideGet(
   return "picker";
 }
 
+/**
+ * Sharing needs no consent from the recipient, so anyone can put their own account among the candidates. While a
+ * passkey another user shared is a candidate, the owned-only rule applies: only a passkey this browser profile
+ * registered or used signs in by itself, so a shared one is chosen in the picker once before it does.
+ */
+export function autoLoginPolicy(candidates: Array<{ access?: string }>, policy: AutoLoginPolicy): AutoLoginPolicy {
+  return candidates.some((c) => c.access === "shared") ? "owned-only" : policy;
+}
+
 /** Keeps credentials listed in allowCredentials; an empty or missing list keeps everything. */
 export function filterByAllowList<T extends { id: string }>(credentials: T[], allowIds: string[] | undefined): T[] {
   if (!allowIds || allowIds.length === 0) return credentials;
