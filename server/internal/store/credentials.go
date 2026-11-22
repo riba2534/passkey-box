@@ -389,7 +389,6 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 		rpKey := strings.ToLower(c.RPID)
 		var prev Credential
 		fields := "[]"
-		c.edited = ""
 		err := tx.QueryRowContext(ctx, `SELECT label, rp_name, user_name, user_display_name, fields, edited FROM credentials
 			WHERE user_id = ? AND rp_id_key = ? AND user_handle = ? ORDER BY created_at DESC, seq DESC LIMIT 1`,
 			userID, rpKey, c.UserHandle).Scan(&prev.Label, &prev.RPName, &prev.UserName, &prev.UserDisplayName, &fields, &prev.edited)
@@ -403,7 +402,6 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 					*c.names()[i] = *prev.names()[i]
 				}
 			}
-			c.edited = prev.edited
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
@@ -426,7 +424,7 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 			 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count, fields, edited)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)`,
 			userID, c.ID, c.RPID, rpKey, c.RPName, c.UserHandle, c.UserName, c.UserDisplayName, c.Alg,
-			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now), fields, c.edited)
+			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now), fields, prev.edited)
 		if err != nil {
 			return err
 		}
@@ -458,18 +456,18 @@ type CredentialUpdate struct {
 	Fields          *[]Field
 }
 
-// names returns the new values of nameColumns, nil for those left alone.
-func (u CredentialUpdate) names() []*string {
-	return []*string{u.RPName, u.UserName, u.UserDisplayName}
+// names points at the new values of nameColumns, nil for those left alone.
+func (u *CredentialUpdate) names() []**string {
+	return []**string{&u.RPName, &u.UserName, &u.UserDisplayName}
 }
 
 // normalize checks u and returns it with the names trimmed and the fields
 // normalized, new field IDs coming from newID.
 func (u CredentialUpdate) normalize(newID func() string) (CredentialUpdate, error) {
-	if u.Label == nil && u.Fields == nil && !slices.ContainsFunc(u.names(), func(p *string) bool { return p != nil }) {
+	if u.Label == nil && u.Fields == nil && !slices.ContainsFunc(u.names(), func(p **string) bool { return *p != nil }) {
 		return u, Invalid("nothing to update")
 	}
-	for i, p := range []**string{&u.RPName, &u.UserName, &u.UserDisplayName} {
+	for i, p := range u.names() {
 		if *p == nil {
 			continue
 		}
@@ -544,7 +542,7 @@ func (s *Store) updateCredential(ctx context.Context, actor Actor, u CredentialU
 		text("label", &c.Label, u.Label)
 		var edited []string
 		for i, col := range nameColumns {
-			if text(col, c.names()[i], u.names()[i]) {
+			if text(col, c.names()[i], *u.names()[i]) {
 				edited = append(edited, col)
 			}
 		}

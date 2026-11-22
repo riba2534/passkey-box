@@ -156,8 +156,7 @@ func readCredentialUpdate(w http.ResponseWriter, r *http.Request) (store.Credent
 	if !readJSON(w, r, &req) {
 		return store.CredentialUpdate{}, false
 	}
-	return store.CredentialUpdate{Label: req.Label, RPName: req.RPName, UserName: req.UserName,
-		UserDisplayName: req.UserDisplayName, Fields: req.Fields}, true
+	return store.CredentialUpdate(req), true
 }
 
 func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, c *caller) {

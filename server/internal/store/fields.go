@@ -2,7 +2,6 @@ package store
 
 import (
 	"crypto/rand"
-	"encoding/base32"
 	"encoding/base64"
 	"fmt"
 	"net/url"
@@ -107,7 +106,8 @@ var base32Pattern = regexp.MustCompile(`^[A-Z2-7]+$`)
 // and the extension share: case-insensitive, ignoring white space and "-",
 // with optional "=" padding at the end, at least one byte long. Lengths no
 // encoder produces (1, 3 or 6 more than a multiple of 8) are refused; Go's
-// decoder would silently drop their last characters.
+// decoder would silently drop their last characters. Every other string of
+// base32 characters decodes to at least one byte.
 func validBase32(s string) bool {
 	s = strings.ToUpper(strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) || r == '-' {
@@ -116,15 +116,7 @@ func validBase32(s string) bool {
 		return r
 	}, s))
 	s = strings.TrimRight(s, "=")
-	if !base32Pattern.MatchString(s) {
-		return false
-	}
-	switch len(s) % 8 {
-	case 1, 3, 6:
-		return false
-	}
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s)
-	return err == nil && len(key) > 0
+	return base32Pattern.MatchString(s) && !slices.Contains([]int{1, 3, 6}, len(s)%8)
 }
 
 const errTOTPSecret = "invalid TOTP secret"
