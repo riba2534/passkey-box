@@ -899,7 +899,8 @@ function fieldRow(f) {
     value.append(code);
     more.push(secret);
     actions.push(revealButton('密钥', (shown) => { secret.hidden = !shown; }));
-    if (!p.error) actions.push(iconButton('copy', '复制验证码', () => code.code && copyText(code.code, '验证码')));
+    // No copy button when no code can be shown.
+    if (!p.error && canComputeCodes()) actions.push(iconButton('copy', '复制验证码', () => code.code && copyText(code.code, '验证码')));
   } else if (!v) {
     value.classList.add('muted');
     value.textContent = '—';
