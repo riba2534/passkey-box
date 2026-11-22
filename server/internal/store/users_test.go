@@ -33,15 +33,6 @@ func auditCount(t *testing.T, s *Store) int {
 	return n
 }
 
-func batchItems(t *testing.T, err error) []ItemError {
-	t.Helper()
-	var be *BatchError
-	if !errors.As(err, &be) {
-		t.Fatalf("err = %v, want a *BatchError", err)
-	}
-	return be.Items
-}
-
 func checkItems(t *testing.T, err error, want ...ItemError) {
 	t.Helper()
 	if got := batchItems(t, err); !reflect.DeepEqual(got, want) {

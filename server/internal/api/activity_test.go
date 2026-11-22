@@ -45,7 +45,7 @@ func actions(events []eventJSON) []string {
 	return out
 }
 
-func brief(id int64, name string) *map[string]any {
+func eventParty(id int64, name string) *map[string]any {
 	return &map[string]any{"id": float64(id), "username": name}
 }
 
@@ -67,7 +67,7 @@ func TestMyActivity(t *testing.T) {
 		t.Fatalf("activity = %v, next %v", got, p.NextBefore)
 	}
 	pw := p.Events[0]
-	if !reflect.DeepEqual(pw.Actor, brief(alice.ID, "alice")) || pw.Via != "basic" || !reflect.DeepEqual(pw.Subject, brief(alice.ID, "alice")) ||
+	if !reflect.DeepEqual(pw.Actor, eventParty(alice.ID, "alice")) || pw.Via != "basic" || !reflect.DeepEqual(pw.Subject, eventParty(alice.ID, "alice")) ||
 		pw.Target != nil || pw.Credential != nil || !reflect.DeepEqual(pw.Detail, map[string]any{"changes": map[string]any{"password": true}}) ||
 		pw.At != "2026-11-20T03:31:00Z" {
 		t.Fatalf("password event = %+v", pw)
@@ -107,13 +107,13 @@ func TestAdminAudit(t *testing.T) {
 	admin.do("POST", "/api/v1/admin/users/batch-delete", map[string]any{"users": []any{"alice"}, "transfer_credentials_to": "bob"}).expect(http.StatusOK)
 
 	for query, want := range map[string][]string{
-		"":                                   {"user.delete", "credential.transfer", "user.update", "user.create", "user.create", "user.create"},
-		fmt.Sprintf("?user_id=%d", alice.ID): {"user.delete", "credential.transfer", "user.update", "user.create"},
+		"":                                   {"user.delete", "credential.transfer", "user.update", "credential.create", "user.create", "user.create", "user.create"},
+		fmt.Sprintf("?user_id=%d", alice.ID): {"user.delete", "credential.transfer", "user.update", "credential.create", "user.create"},
 		fmt.Sprintf("?actor_id=%d", root.ID): {"user.delete", "credential.transfer", "user.update"},
 		"?action=user.":                      {"user.delete", "user.update", "user.create", "user.create", "user.create"},
 		"?action=user.update":                {"user.update"},
 		"?action=user":                       {},
-		"?credential_id=YWxpY2U":             {"credential.transfer"},
+		"?credential_id=YWxpY2U":             {"credential.transfer", "credential.create"},
 		"?limit=1":                           {"user.delete"},
 	} {
 		got := actions(admin.do("GET", "/api/v1/admin/audit"+query, nil).expect(http.StatusOK).eventPage().Events)
@@ -123,7 +123,7 @@ func TestAdminAudit(t *testing.T) {
 	}
 	tr := admin.do("GET", "/api/v1/admin/audit?action=credential.transfer", nil).expect(http.StatusOK).eventPage().Events[0]
 	if !reflect.DeepEqual(tr.Credential, &map[string]any{"id": "YWxpY2U", "rp_id": "github.com", "user_name": "alice@example.com"}) ||
-		!reflect.DeepEqual(tr.Subject, brief(alice.ID, "alice")) || (*tr.Target)["username"] != "bob" ||
+		!reflect.DeepEqual(tr.Subject, eventParty(alice.ID, "alice")) || (*tr.Target)["username"] != "bob" ||
 		!reflect.DeepEqual(tr.Detail, map[string]any{"keep_access": false}) {
 		t.Fatalf("transfer event = %+v", tr)
 	}

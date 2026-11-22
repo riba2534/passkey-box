@@ -277,7 +277,7 @@ func TestSharesGoWithCredentialAndUser(t *testing.T) {
 	if err := f.s.db.QueryRow(`SELECT COUNT(*) FROM credential_shares`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("shares after deleting the credential = %d, %v", n, err)
 	}
-	if err := f.s.DeleteUser(ctx, f.users["bob"].ID); err != nil {
+	if err := f.s.DeleteUser(ctx, SystemActor, f.users["bob"].ID, t0); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.get("Yg"); len(got.Shares) != 0 {
@@ -292,13 +292,13 @@ func TestSharesGoWithCredentialAndUser(t *testing.T) {
 	if _, err := f.s.ShareCredentials(ctx, b, []UserKey{{Username: "carol"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.DeleteUser(ctx, root.ID); err != nil {
+	if err := f.s.DeleteUser(ctx, SystemActor, root.ID, t0); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.get("Yg"); len(got.Shares) != 1 || got.Shares[0].User.Username != "carol" || got.Shares[0].SharedBy != nil {
 		t.Fatalf("share by a deleted user = %+v", got.Shares)
 	}
-	if err := f.s.DeleteUser(ctx, f.users["alice"].ID); err != nil {
+	if err := f.s.DeleteUser(ctx, SystemActor, f.users["alice"].ID, t0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.s.GetAnyCredential(ctx, "Yg"); !errors.Is(err, ErrNotFound) {
