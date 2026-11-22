@@ -20,6 +20,7 @@ describe("decodeBase32", () => {
     expect(hex(decodeBase32(SHA256_SEED)!)).toBe(ascii("12345678901234567890123456789012"));
     expect(hex(decodeBase32("gezd gnbv-gy3t qojq")!)).toBe(ascii("1234567890"));
     expect(hex(decodeBase32(" \tGEZDGNBVGY3TQOJQ\n")!)).toBe(ascii("1234567890"));
+    expect(hex(decodeBase32("\fGEZD\vGNBV\rGY3T\nQOJQ\t ")!)).toBe(ascii("1234567890"));
     expect(hex(decodeBase32("GE======")!)).toBe("31");
     expect(hex(decodeBase32("GE=")!)).toBe("31");
     // RFC 4648 test vectors.
@@ -32,6 +33,17 @@ describe("decodeBase32", () => {
     for (const bad of ["", "   ", "-", "====", "G", "GEZ", "GEZDGN", "GEZDGNBVG", "GE1", "GE8A", "GE=A", "G=E", "GEZDGNBV========X", "GÉ", "0O"]) {
       expect([bad, decodeBase32(bad)]).toEqual([bad, null]);
     }
+  });
+
+  it("ignores only ASCII whitespace, and checks the letters before upper-casing them", () => {
+    // String.prototype.trim() and \s would drop these; the server does not.
+    for (const space of ["\u0085", "\ufeff", "\u00a0", "\u2028", "\u3000"]) {
+      for (const bad of [`JBSWY3DP${space}EHPK3PXP`, `${space}JBSWY3DPEHPK3PXP`, `JBSWY3DPEHPK3PXP${space}`]) {
+        expect([bad, decodeBase32(bad)]).toEqual([bad, null]);
+      }
+    }
+    // Upper-casing turns U+00DF (sharp s) into "SS" and U+FB00 (the ff ligature) into "FF", but neither is base32.
+    for (const bad of ["\u00df", "GEZDGNBV\u00df", "\ufb00"]) expect([bad, decodeBase32(bad)]).toEqual([bad, null]);
   });
 });
 
@@ -85,6 +97,22 @@ describe("parseTotp", () => {
     expect(parseTotp(`otpauth://totp/x?secret=1&secret=${SHA1_SEED}`)).toBeNull();
   });
 
+  it("reads the period as a whole number, leading zeros and all", () => {
+    expect(parseTotp(`otpauth://totp/x?secret=${SHA1_SEED}&period=030`)).toMatchObject({ period: 30 });
+    expect(parseTotp(`otpauth://totp/x?secret=${SHA1_SEED}&period=0300`)).toMatchObject({ period: 300 });
+    expect(parseTotp(`otpauth://totp/x?secret=${SHA1_SEED}&period=0301`)).toBeNull();
+  });
+
+  it("trims only ASCII whitespace around the value", () => {
+    expect(parseTotp(` \t\n\r\f\votpauth://totp/x?secret=${SHA1_SEED}&digits=8 \t\n\r\f\v`)).toMatchObject({ digits: 8 });
+    for (const space of ["\u0085", "\ufeff", "\u00a0"]) {
+      for (const bad of [`${space}otpauth://totp/x?secret=${SHA1_SEED}`, `${space}${SHA1_SEED}`, `otpauth://totp/x?secret=${SHA1_SEED}${space}`]) {
+        expect([bad, parseTotp(bad)]).toEqual([bad, null]);
+      }
+    }
+    expect(parseTotp(`otpauth://totp/x?secret=JBSWY3DP%C2%85EHPK3PXP`)).toBeNull();
+  });
+
   it("rejects malformed values", () => {
     for (const bad of [
       "",
@@ -105,6 +133,9 @@ describe("parseTotp", () => {
       `otpauth://totp/x?secret=${SHA1_SEED}&digits=5`,
       `otpauth://totp/x?secret=${SHA1_SEED}&digits=9`,
       `otpauth://totp/x?secret=${SHA1_SEED}&digits=6.0`,
+      `otpauth://totp/x?secret=${SHA1_SEED}&digits=06`,
+      `otpauth://totp/x?secret=${SHA1_SEED}&digits=+6`,
+      `otpauth://totp/x?secret=${SHA1_SEED}&digits=%206`,
       `otpauth://totp/x?secret=${SHA1_SEED}&period=0`,
       `otpauth://totp/x?secret=${SHA1_SEED}&period=301`,
       `otpauth://totp/x?secret=${SHA1_SEED}&period=-30`,
