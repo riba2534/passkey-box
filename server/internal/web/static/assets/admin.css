@@ -2,6 +2,11 @@
 
 /* ---------- Lists ---------- */
 
+.select-all { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.list-header .selection-bar { margin-top: 10px; }
+.admin-page .list-item .select-box { margin-right: -2px; }
+.admin-page .item-title .badge.gray { min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; line-height: 18px; }
+.admin-page .item-title a.text { color: inherit; }
 .load-more { display: flex; justify-content: center; padding: 10px 0 4px; color: var(--text-3); font-size: 12px; }
 
 /* ---------- Filters ---------- */
@@ -28,6 +33,19 @@ button.chip:hover { background: var(--bg-hover); }
 .chip-select { height: 28px; border: 1px dashed var(--border-strong); border-radius: 999px; background-color: #fff; padding-left: 10px; }
 .chip-select.active { border-style: solid; border-color: var(--primary-soft-strong); background-color: var(--primary-soft); color: var(--primary); }
 .filter-input { width: 200px; max-width: 100%; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12px; }
+
+/* ---------- Detail ---------- */
+
+.admin-actions { margin: -8px 0 20px; }
+.card-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
+.card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; border-top: 1px solid var(--border); }
+
+/* ---------- Dialogs ---------- */
+
+.modal-foot.wrap { flex-wrap: wrap; }
+.share-warning { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; color: #8A5A00; }
+.share-warning .icon { width: 16px; height: 16px; margin-top: 2px; }
+.keep-access { margin-top: 10px; }
 
 /* ---------- Audit events ---------- */
 
