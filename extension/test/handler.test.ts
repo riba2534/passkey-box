@@ -5,6 +5,7 @@ import { bytesToBase64url, utf8 } from "../src/lib/base64url";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "../src/lib/authenticator";
 import type { Config, Settings } from "../src/lib/config";
 import { handleRequest, type CredentialStore, type OwnedStore } from "../src/lib/handler";
+import type { AutoLoginPolicy } from "../src/lib/managed";
 import { rememberCredential } from "../src/lib/owned";
 import type { BackgroundRequest, CallerInfo, CreationOptionsJSON, RequestOptionsJSON } from "../src/lib/protocol";
 
@@ -67,10 +68,15 @@ class MemoryProfile implements OwnedStore {
 }
 
 // Without a profile, every call runs in a fresh one that has registered and used nothing.
-function deps(store: MemoryStore, opts: { config?: Config | null; settings?: Partial<Settings>; profile?: MemoryProfile } = {}) {
+// Without autoLogin, no launcher manages the extension.
+function deps(
+  store: MemoryStore,
+  opts: { config?: Config | null; settings?: Partial<Settings>; profile?: MemoryProfile; autoLogin?: AutoLoginPolicy } = {},
+) {
   return {
     loadConfig: async () => (opts.config === undefined ? config : opts.config),
     loadSettings: async () => ({ autoLoginSingle: true, conditionalAutoLogin: true, ...opts.settings }),
+    loadPolicy: async () => ({ autoLogin: opts.autoLogin ?? "any" }),
     store: vi.fn(() => store),
     owned: opts.profile ?? new MemoryProfile(),
   };
@@ -557,5 +563,114 @@ describe("handleRequest: credentials of this browser profile", () => {
     profile.failRemember = true;
     expect(signedInAs(await handleRequest(getReq(), deps(store, { profile })))).toBe("olga");
     expect((await handleRequest(createReq(), deps(store, { profile }))).action).toBe("success");
+  });
+});
+
+// AnyBrowser profiles share one Passkey Box account and set autoLogin "owned-only" in managed-config.json,
+// so a profile never signs in as an account another profile registered without the user choosing it.
+describe("handleRequest: owned-only policy", () => {
+  const signedInAs = (res: unknown) => (res as { userName?: string }).userName;
+  const pickerOf = (res: unknown) => (res as { candidates: Array<{ id: string; user_name: string; owned?: boolean }> }).candidates;
+  const conditional = () => getReq(getOptions(), { mediation: "conditional" });
+
+  it("another profile's only passkey → picker instead of signing in, for modal and conditional requests", async () => {
+    const store = new MemoryStore();
+    const a = new MemoryProfile();
+    const b = new MemoryProfile();
+    const alice = await register(store, "alice", -7, a);
+
+    for (const req of [getReq(), conditional()]) {
+      const res = await handleRequest(req, deps(store, { profile: b, autoLogin: "owned-only" }));
+      expect(res.action).toBe("picker");
+      expect(pickerOf(res)).toEqual([expect.objectContaining({ id: alice.id, user_name: "alice", owned: false })]);
+      expect(signedInAs(await handleRequest(req, deps(store, { profile: a, autoLogin: "owned-only" })))).toBe("alice");
+    }
+    await b.settled();
+    expect(b.owned.size).toBe(0);
+    expect(store.used).toEqual([alice.id, alice.id]);
+  });
+
+  it("without a launcher policy the same request still signs in, as before", async () => {
+    const store = new MemoryStore();
+    await register(store, "alice", -7, new MemoryProfile());
+    const b = new MemoryProfile();
+    expect(signedInAs(await handleRequest(getReq(), deps(store, { profile: b })))).toBe("alice");
+    expect(signedInAs(await handleRequest(conditional(), deps(store, { profile: b, autoLogin: "any" })))).toBe("alice");
+  });
+
+  it("an account chosen in the picker signs in by itself from then on", async () => {
+    const store = new MemoryStore();
+    const alice = await register(store, "alice", -7, new MemoryProfile());
+    const b = new MemoryProfile();
+    const managed = deps(store, { profile: b, autoLogin: "owned-only" });
+    expect((await handleRequest(conditional(), managed)).action).toBe("picker");
+    expect(signedInAs(await handleRequest(getReq(getOptions(), { credentialId: alice.id, mediation: "conditional" }), managed))).toBe("alice");
+    await b.settled();
+    expect([...b.owned.keys()]).toEqual([alice.id]);
+    expect(signedInAs(await handleRequest(getReq(), managed))).toBe("alice");
+    expect(signedInAs(await handleRequest(conditional(), managed))).toBe("alice");
+  });
+
+  it("several accounts: this profile's only one signs in; none or several of them ask", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    await register(store, "carol");
+    await register(store, "dan", -7, profile);
+    await register(store, "erin");
+    const managed = (settings: Partial<Settings> = {}) => deps(store, { profile, settings, autoLogin: "owned-only" });
+
+    expect(signedInAs(await handleRequest(getReq(), managed()))).toBe("dan");
+    expect(signedInAs(await handleRequest(conditional(), managed()))).toBe("dan");
+    expect((await handleRequest(getReq(), deps(store, { autoLogin: "owned-only" }))).action).toBe("picker");
+
+    await register(store, "fay", -7, profile);
+    const res = await handleRequest(getReq(), managed());
+    expect(res.action).toBe("picker");
+    expect(pickerOf(res).map((c) => [c.user_name, c.owned])).toEqual([
+      ["fay", true],
+      ["dan", true],
+      ["erin", false],
+      ["carol", false],
+    ]);
+  });
+
+  it("follows autoLoginSingle and conditionalAutoLogin like a single candidate", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    await register(store, "gina", -7, profile);
+    const managed = (settings: Partial<Settings>) => deps(store, { profile, settings, autoLogin: "owned-only" });
+    expect((await handleRequest(getReq(), managed({ autoLoginSingle: false }))).action).toBe("picker");
+    expect(signedInAs(await handleRequest(conditional(), managed({ autoLoginSingle: false })))).toBe("gina");
+    expect(await handleRequest(conditional(), managed({ conditionalAutoLogin: false }))).toEqual({ action: "pending" });
+    // Another profile asks even with autoLoginSingle off for conditional requests.
+    expect((await handleRequest(conditional(), deps(store, { settings: { autoLoginSingle: false }, autoLogin: "owned-only" }))).action).toBe(
+      "picker",
+    );
+  });
+
+  it("applies after allowCredentials: a username-first login asks once too", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    const hank = await register(store, "hank", -7, profile);
+    const ivy = await register(store, "ivy");
+    const allow = (id: string) => getReq(getOptions({ allowCredentials: [{ type: "public-key", id }] }));
+    const managed = deps(store, { profile, autoLogin: "owned-only" });
+    expect(signedInAs(await handleRequest(allow(hank.id), managed))).toBe("hank");
+    expect(pickerOf(await handleRequest(allow(ivy.id), managed)).map((c) => c.user_name)).toEqual(["ivy"]);
+  });
+
+  it("no candidates → empty dialog or silence, as before", async () => {
+    const store = new MemoryStore();
+    const managed = deps(store, { autoLogin: "owned-only" });
+    expect(await handleRequest(getReq(), managed)).toEqual({ action: "empty" });
+    expect(await handleRequest(conditional(), managed)).toEqual({ action: "pending" });
+  });
+
+  it("an unreadable record signs in with nothing by itself", async () => {
+    const store = new MemoryStore();
+    const profile = new MemoryProfile();
+    await register(store, "jack", -7, profile);
+    profile.failLoad = true;
+    expect((await handleRequest(getReq(), deps(store, { profile, autoLogin: "owned-only" }))).action).toBe("picker");
   });
 });

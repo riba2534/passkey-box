@@ -2,8 +2,9 @@
 
 import { CONFIG_KEY } from "./lib/config";
 import { verifyLogin } from "./lib/login";
+import { MANAGED_KEY } from "./lib/managed";
 import { serverHost } from "./lib/popup-model";
-import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from "./lib/storage";
+import { clearConfig, loadConfig, loadPolicy, loadSettings, saveConfig, saveSettings } from "./lib/storage";
 import { button, h } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
 import { LOGO_FILE, logo } from "./ui/logo";
@@ -11,7 +12,7 @@ import { LOGO_FILE, logo } from "./ui/logo";
 const app = document.getElementById("app")!;
 
 async function render(): Promise<void> {
-  const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
+  const [config, settings, policy] = await Promise.all([loadConfig(), loadSettings(), loadPolicy()]);
 
   const status = config
     ? h(
@@ -52,18 +53,23 @@ async function render(): Promise<void> {
       "section",
       { class: "card" },
       h(document, "h2", {}, "自动登录"),
-      settingsPanel(document, settings, async (next) => {
-        await saveSettings(next);
-        saved.hidden = false;
-        setTimeout(() => (saved.hidden = true), 1200);
-      }),
+      settingsPanel(
+        document,
+        settings,
+        async (next) => {
+          await saveSettings(next);
+          saved.hidden = false;
+          setTimeout(() => (saved.hidden = true), 1200);
+        },
+        policy.autoLogin,
+      ),
       saved,
     ),
   );
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && CONFIG_KEY in changes) void render();
+  if (area === "local" && (CONFIG_KEY in changes || MANAGED_KEY in changes)) void render();
 });
 
 void render();

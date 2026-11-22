@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "../src/lib/config";
-import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "../src/lib/decision";
+import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm, type GetDecision } from "../src/lib/decision";
 import { effectiveRpId, hostMatchesRpId, isIpAddress } from "../src/lib/rpid";
 
 const on: Settings = { autoLoginSingle: true, conditionalAutoLogin: true };
@@ -68,6 +68,62 @@ describe("decideGet with credentials of this browser profile", () => {
     expect(decideGet(3, "conditional", on, 3)).toBe("picker");
     expect(decideGet(1, undefined, on, 1)).toBe("auto");
     expect(decideGet(1, undefined, on, 0)).toBe("auto");
+  });
+});
+
+describe("decideGet with the launcher's autoLogin policy", () => {
+  // Expected decision for [any, owned-only] with autoLoginSingle on, then [any, owned-only] with it off.
+  type Row = [candidates: number, owned: number, expected: [GetDecision, GetDecision, GetDecision, GetDecision]];
+  const modal: Row[] = [
+    [0, 0, ["empty", "empty", "empty", "empty"]],
+    [1, 0, ["auto", "picker", "picker", "picker"]],
+    [1, 1, ["auto", "auto", "picker", "picker"]],
+    [3, 0, ["picker", "picker", "picker", "picker"]],
+    [3, 1, ["auto", "auto", "picker", "picker"]],
+    [3, 2, ["picker", "picker", "picker", "picker"]],
+  ];
+  const conditional: Row[] = [
+    [0, 0, ["pending", "pending", "pending", "pending"]],
+    [1, 0, ["auto", "picker", "auto", "picker"]],
+    [1, 1, ["auto", "auto", "auto", "auto"]],
+    [3, 0, ["picker", "picker", "picker", "picker"]],
+    [3, 1, ["auto", "auto", "picker", "picker"]],
+    [3, 2, ["picker", "picker", "picker", "picker"]],
+  ];
+  const decide = (candidates: number, owned: number, mediation: string | undefined, settings: Settings) =>
+    (["any", "owned-only"] as const).map((policy) => decideGet(candidates, mediation, settings, owned, policy));
+
+  it.each([undefined, "optional", "required", "silent"])("mediation %s", (mediation) => {
+    for (const [candidates, owned, expected] of modal) {
+      const result = [...decide(candidates, owned, mediation, on), ...decide(candidates, owned, mediation, { ...on, autoLoginSingle: false })];
+      expect([candidates, owned, result]).toEqual([candidates, owned, expected]);
+    }
+  });
+
+  it("conditional", () => {
+    for (const [candidates, owned, expected] of conditional) {
+      const choose = { ...on, autoLoginSingle: false };
+      const result = [...decide(candidates, owned, "conditional", on), ...decide(candidates, owned, "conditional", choose)];
+      expect([candidates, owned, result]).toEqual([candidates, owned, expected]);
+    }
+  });
+
+  it("conditional requests stay pending when conditionalAutoLogin is off", () => {
+    for (const [candidates, owned] of conditional) {
+      for (const autoLoginSingle of [true, false]) {
+        expect(decide(candidates, owned, "conditional", { autoLoginSingle, conditionalAutoLogin: false })).toEqual(["pending", "pending"]);
+      }
+    }
+  });
+
+  it("any decides exactly as without a policy", () => {
+    for (const mediation of [undefined, "conditional"]) {
+      for (const settings of [on, off, { ...on, autoLoginSingle: false }, { ...on, conditionalAutoLogin: false }]) {
+        for (const [candidates, owned] of modal) {
+          expect(decideGet(candidates, mediation, settings, owned, "any")).toBe(decideGet(candidates, mediation, settings, owned));
+        }
+      }
+    }
   });
 });
 

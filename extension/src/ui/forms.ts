@@ -3,6 +3,7 @@
 import type { User } from "../lib/api";
 import type { Config, Settings } from "../lib/config";
 import type { LoginResult } from "../lib/login";
+import type { AutoLoginPolicy } from "../lib/managed";
 import { h } from "./dom";
 
 export interface LoginFormOptions {
@@ -85,10 +86,14 @@ const SETTING_LABELS: Record<keyof Settings, { title: string; desc: string }> = 
   },
 };
 
+// The launcher's owned-only policy (managed.ts) narrows both switches; users cannot change it here.
+const OWNED_ONLY_NOTE = "由启动器（如 AnyBrowser）管理：只自动使用在本浏览器 Profile 注册或用过的通行密钥，其他账号先在选择框里选一次。";
+
 export function settingsPanel(
   doc: Document,
   settings: Settings,
   onChange: (settings: Settings) => Promise<void> | void,
+  autoLogin: AutoLoginPolicy = "any",
 ): HTMLElement {
   const current: Settings = { ...settings };
   const rows = (Object.keys(SETTING_LABELS) as Array<keyof Settings>).map((key) => {
@@ -112,5 +117,6 @@ export function settingsPanel(
       input,
     );
   });
-  return h(doc, "div", { class: "settings" }, ...rows);
+  const note = autoLogin === "owned-only" ? h(doc, "p", { class: "settings-note", "data-policy": autoLogin }, OWNED_ONLY_NOTE) : null;
+  return h(doc, "div", { class: "settings" }, ...rows, note);
 }

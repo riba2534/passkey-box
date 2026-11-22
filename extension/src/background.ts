@@ -4,17 +4,17 @@ import { CONFIG_KEY, type Config } from "./lib/config";
 import { handleRequest } from "./lib/handler";
 import { applyManagedConfig, MANAGED_CONFIG_FILE, readManagedConfig, sameConfig } from "./lib/managed";
 import type { BackgroundRequest, BackgroundResponse } from "./lib/protocol";
-import { loadConfig, loadOwned, loadSettings, rememberOwned, saveConfig } from "./lib/storage";
+import { loadConfig, loadOwned, loadPolicy, loadSettings, rememberOwned, saveConfig, savePolicy } from "./lib/storage";
 
 const tasks = new Map<string, { tabId: number; controller: AbortController }>();
 const trustedStorage = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 let managedConfig: Config | null = null;
-// Requests wait until a managed account (managed-config.json) has been signed in.
+// Requests wait until a managed account and policy (managed-config.json) have been stored.
 const ready = trustedStorage
   .then(() => readManagedConfig(chrome.runtime.getURL(MANAGED_CONFIG_FILE)))
-  .then((config) => {
-    managedConfig = config;
-    return config && applyManagedConfig(config, { loadConfig, saveConfig });
+  .then((managed) => {
+    managedConfig = managed?.account ?? null;
+    return managed && applyManagedConfig(managed, { loadConfig, saveConfig, loadPolicy, savePolicy });
   })
   .catch(() => undefined);
 
@@ -63,6 +63,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, reply: (response
   void ready.then(() => handleRequest({ ...request, caller }, {
     loadConfig,
     loadSettings,
+    loadPolicy,
     store: (config) => new ServerClient(config),
     owned: { load: loadOwned, remember: rememberOwned },
     signal: controller.signal,
