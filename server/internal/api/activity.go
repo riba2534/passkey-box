@@ -90,9 +90,8 @@ func readEventPage(w http.ResponseWriter, q url.Values, f *store.AuditFilter) bo
 	return true
 }
 
-// writeEvents answers a page of the events f selects. next_before is set when
-// older events remain.
-// writeEvents answers a page of events. hideNotes replaces the text of
+// writeEvents answers a page of the events f selects; next_before is set when
+// older events remain. hideNotes replaces the text of
 // administrators' notes in user.update events with true, for callers who may
 // not read notes.
 func (s *Server) writeEvents(w http.ResponseWriter, r *http.Request, f store.AuditFilter, hideNotes bool) {

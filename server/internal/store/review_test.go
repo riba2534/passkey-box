@@ -28,9 +28,20 @@ func TestBootstrapAdminNameCannotChangeHands(t *testing.T) {
 	if err := rename(admin.ID, "hpc"); !errors.As(err, &inv) {
 		t.Fatalf("renaming the bootstrap administrator = %v", err)
 	}
-	if err := rename(bob.ID, "ADMIN"); !errors.As(err, &inv) {
+	if err := rename(bob.ID, "ADMIN"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("renaming bob to the bootstrap name = %v", err)
 	}
+	// Free while the bootstrap account is deleted, the name stays reserved.
+	if err := s.DeleteUser(ctx, SystemActor, admin.ID, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := rename(bob.ID, "admin"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("renaming bob to the free bootstrap name = %v", err)
+	}
+	if _, err := s.EnsureAdmin(ctx, "admin", "pw", t0); err != nil {
+		t.Fatal(err)
+	}
+	admin, _ = resolveUser(ctx, s.db, UserKey{Username: "admin"})
 	if _, err := s.UpdateUsers(ctx, actor, []UserEdit{{User: UserKey{ID: bob.ID}, UserUpdate: UserUpdate{Username: new("Admin")}}}, true, t0); err == nil {
 		t.Fatal("batch rename to the bootstrap name succeeded")
 	}

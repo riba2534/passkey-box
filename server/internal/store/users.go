@@ -56,7 +56,8 @@ var (
 	// errTokenOwnPassword keeps an API token from renewing itself by changing
 	// its user's password through the administrator endpoints.
 	errTokenOwnPassword = Invalid("an API token cannot change the password of its own user")
-	errReservedUsername = Invalid("this username belongs to the bootstrap administrator (PKB_ADMIN_USERNAME) and cannot be given or taken away")
+	errReservedUsername = &conflictError{"username is reserved for the bootstrap administrator (PKB_ADMIN_USERNAME)"}
+	errRenameBootstrap  = Invalid("the bootstrap administrator (PKB_ADMIN_USERNAME) cannot be renamed")
 	errDuplicate        = Invalid("duplicate item")
 	errDemoteSelf       = Invalid("you cannot remove your own administrator role")
 	errDisableSelf      = Invalid("you cannot disable yourself")
@@ -205,11 +206,16 @@ func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUp
 			return UpdatedUser{}, errInvalidUsername
 		}
 		if display != user.Username {
-			if oldKey := strings.ToLower(user.Username); reserved != "" && key != oldKey && (key == reserved || oldKey == reserved) {
-				return UpdatedUser{}, errReservedUsername
-			}
 			if err := usernameTaken(ctx, q, key, user.ID); err != nil {
 				return UpdatedUser{}, err
+			}
+			if oldKey := strings.ToLower(user.Username); reserved != "" && key != oldKey {
+				switch reserved {
+				case oldKey:
+					return UpdatedUser{}, errRenameBootstrap
+				case key: // free only while the bootstrap account is deleted
+					return UpdatedUser{}, errReservedUsername
+				}
 			}
 			changed("username", user.Username, display)
 			assign("username_key", key)

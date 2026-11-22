@@ -78,7 +78,9 @@ export function groupCredentials(credentials: Credential[], hostname: string, qu
  * else https://<rp_id>. Another user wrote the origin of a shared passkey, so it must not lead to another site.
  */
 export function siteUrl(c: Pick<Credential, "origin" | "rp_id">): string {
-  return hostMatchesRpId(tabHostname(c.origin), c.rp_id) ? c.origin : `https://${c.rp_id}`;
+  if (hostMatchesRpId(tabHostname(c.origin), c.rp_id)) return c.origin;
+  // The RP ID comes from whoever registered or shared the passkey: only a bare host name makes a link to it.
+  return /^[a-z0-9.-]+$/i.test(c.rp_id) ? `https://${c.rp_id}` : "";
 }
 
 function pad(n: number): string {

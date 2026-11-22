@@ -84,9 +84,10 @@ func (s *Store) migrate(ctx context.Context, path string, existed bool, now time
 			return m, fmt.Errorf("snapshot database before migrating to schema %d: %w", SchemaVersion, err)
 		}
 		// The copy holds every private key: keep it as private as the database.
+		// A file system without permissions must not stop the upgrade.
 		if fi, err := os.Stat(path); err == nil {
 			if err := os.Chmod(snapshot, fi.Mode().Perm()); err != nil {
-				return m, err
+				log.Printf("set permissions of %s: %v", snapshot, err)
 			}
 		}
 		m.Snapshot = snapshot

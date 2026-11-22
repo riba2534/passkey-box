@@ -260,7 +260,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
             () => flash("复制失败"),
           );
         }),
-        button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })),
+        siteUrl(c) ? button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })) : null,
         del,
       ),
       status,

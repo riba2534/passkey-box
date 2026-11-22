@@ -69,6 +69,10 @@ describe("popup model", () => {
     // Subdomain matching follows WebAuthn: not for IP addresses or rp_ids without a dot.
     expect(siteUrl(cred({ origin: "http://evil.localhost:1", rp_id: "localhost" }))).toBe("https://localhost");
     expect(siteUrl(cred({ origin: "http://127.0.0.1:8080", rp_id: "0.0.1" }))).toBe("https://0.0.1");
+    // An RP ID that is not a bare host name would send the fallback link elsewhere.
+    for (const rp_id of ["github.com@evil.com", "github.com/x", "github.com:1@evil.com", "a b"]) {
+      expect([rp_id, siteUrl(cred({ origin: "https://evil.com", rp_id }))]).toEqual([rp_id, ""]);
+    }
   });
 
   it("formats times in local time", () => {
