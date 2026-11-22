@@ -501,8 +501,10 @@ svg { display: block; }
 }
 .selection-bar[hidden] { display: none; }
 .selection-count { white-space: nowrap; }
-.selection-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
-.selection-bar .icon-btn { color: var(--primary); }
+/* Two rows that fit the narrow list pane: the count and the clear button,
+   then the actions on a row of their own. */
+.selection-bar > .icon-btn { order: 1; margin-left: auto; color: var(--primary); }
+.selection-actions { order: 2; flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
 .select-box { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--primary); cursor: pointer; }
 
 /* ---------- Responsive ---------- */
