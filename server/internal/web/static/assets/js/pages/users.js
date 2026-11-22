@@ -434,8 +434,13 @@ async function createUsers(lines) {
   if (rows.some((r) => r.password)) passwordsDialog('已创建的用户', rows);
 }
 
+// csvCell writes one CSV field. A field a spreadsheet would run as a
+// formula (starting with =, +, -, @, a tab or a carriage return) gets a
+// leading apostrophe and quotes.
 function csvCell(s) {
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const formula = /^[=+\-@\t\r]/.test(s);
+  const v = formula ? `'${s}` : s;
+  return formula || /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
 function passwordsCSV(rows) {
