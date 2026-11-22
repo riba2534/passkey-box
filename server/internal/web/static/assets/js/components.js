@@ -1,9 +1,11 @@
 // Shared widgets for sharing, transfers and admin batch work: the user
-// picker, batch requests with a dry-run preview, multi-select, audit event
-// sentences and passkey sharing badges.
+// picker, batch requests with a dry-run preview, multi-select, list filters,
+// audit event sentences and the parts of a passkey's detail that the user
+// and admin pages share.
 
 import {
-  h, icon, iconButton, api, errText, sessionEnded, openModal, emptyState, loading, searchBox, userAvatar,
+  h, icon, iconButton, api, errText, sessionEnded, toast, toastError, renderShell, openModal, emptyState,
+  loading, searchBox, userAvatar, credBrief, algName, field, copyAction,
 } from './core.js';
 
 /* ------------------------------------------------------------------ */
@@ -423,6 +425,48 @@ export function selectAllBox(sel, ids) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Filters                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * filterChip is a filter that is set in a dialog: "+ 主人" while unset,
+ * "主人：alice ×" once set.
+ *
+ * @param {string} label
+ * @param {string} value     The current value's text, or "" when unset.
+ * @param {() => void} onpick   Opens the dialog that sets the filter.
+ * @param {() => void} onclear  Clears the filter.
+ * @returns {HTMLElement}
+ */
+export function filterChip(label, value, onpick, onclear) {
+  if (!value) return h('button', { type: 'button', class: 'chip', onclick: onpick }, icon('plus'), label);
+  return h('span', { class: 'chip active' },
+    h('button', { type: 'button', class: 'chip-text', title: `${label}：${value}`, onclick: onpick }, `${label}：${value}`),
+    iconButton('x', `清除${label}筛选`, onclear, 'chip-x'));
+}
+
+/**
+ * filterSelect is a drop-down filter styled like filterChip.
+ *
+ * @param {string} label  Accessible name.
+ * @param {string} value  The selected value; "" means no filter.
+ * @param {Array<[string, string] | [string, Array<[string, string]>]>} options
+ *   [value, text] pairs; [group label, pairs] makes an option group.
+ * @param {(value: string) => void} onchange
+ * @returns {HTMLSelectElement}
+ */
+export function filterSelect(label, value, options, onchange) {
+  const option = ([v, t]) => h('option', { value: v }, t);
+  const select = h('select', {
+    class: 'select chip-select' + (value ? ' active' : ''),
+    'aria-label': label,
+    onchange: (e) => onchange(e.target.value),
+  }, options.map(([v, t]) => (Array.isArray(t) ? h('optgroup', { label: v }, t.map(option)) : option([v, t]))));
+  select.value = value;
+  return select;
+}
+
+/* ------------------------------------------------------------------ */
 /* Audit events                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -441,10 +485,6 @@ function say(...parts) {
   });
 }
 
-function credText(c) {
-  return c.user_name ? `${c.rp_id} · ${c.user_name}` : c.rp_id;
-}
-
 /**
  * eventText describes an AuditEvent in one Chinese sentence, e.g.
  * "admin 把 alice 的 github.com · alice@example.com 转移给了 bob".
@@ -461,7 +501,7 @@ export function eventText(event, meId) {
   const d = event.detail || {};
   const self = Boolean(event.actor && event.subject && event.actor.id === event.subject.id);
   const whose = self ? '自己' : subject;
-  const cred = event.credential ? credText(event.credential) : '通行密钥';
+  const cred = event.credential ? credBrief(event.credential) : '通行密钥';
   // A passkey is named with its owner unless the owner acts on it.
   const owned = self ? [cred] : [subject, '的', cred];
 
@@ -514,8 +554,18 @@ export function eventText(event, meId) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Passkey badges                                                      */
+/* Passkeys                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * labelBadge shows a passkey's label, with the full text on hover.
+ *
+ * @param {object} c  Credential.
+ * @returns {HTMLElement|null} A .badge, or null without a label.
+ */
+export function labelBadge(c) {
+  return c.label ? h('span', { class: 'badge gray', title: c.label }, c.label) : null;
+}
 
 /**
  * credentialBadges labels how a passkey is shared: "共享自 alice" when it
@@ -530,4 +580,59 @@ export function credentialBadges(c) {
   if (c.access === 'shared' && c.owner) badges.push(h('span', { class: 'badge violet' }, `共享自 ${c.owner.username}`));
   if (c.shared_with && c.shared_with.length) badges.push(h('span', { class: 'badge green' }, `已共享 ${c.shared_with.length} 人`));
   return badges;
+}
+
+/**
+ * labelEditor is a card for changing a passkey's label: 保存 or Enter calls
+ * save with the new text, then says so and redraws; a failure is reported
+ * and the label can be saved again.
+ *
+ * @param {object} c  Credential.
+ * @param {(label: string) => Promise<void>} save  Stores the label and updates the page's data.
+ * @param {string} [hint]  Text under the input.
+ * @returns {HTMLElement}
+ */
+export function labelEditor(c, save, hint) {
+  const input = h('input', { class: 'input', value: c.label, placeholder: '添加备注，例如“工作号”', maxlength: '200', 'aria-label': '备注' });
+  const button = h('button', { type: 'button', class: 'btn btn-primary btn-sm', disabled: true }, '保存');
+  const submit = async () => {
+    if (input.value === c.label) return;
+    button.disabled = true;
+    try {
+      await save(input.value);
+      toast('备注已保存');
+      renderShell();
+    } catch (err) {
+      button.disabled = false;
+      toastError(err);
+    }
+  };
+  input.addEventListener('input', () => {
+    button.disabled = input.value === c.label;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+  });
+  button.addEventListener('click', submit);
+  return h('div', { class: 'card' },
+    h('div', { class: 'field' }, h('div', { class: 'field-main' },
+      h('div', { class: 'label-edit' }, input, button),
+      hint ? h('div', { class: 'form-hint' }, hint) : null)));
+}
+
+/**
+ * credentialTechInfo is the 技术信息 section of a passkey's detail.
+ *
+ * @param {object} c  Credential.
+ * @returns {HTMLElement[]} The section title and its card.
+ */
+export function credentialTechInfo(c) {
+  return [
+    h('h3', { class: 'section-title' }, '技术信息'),
+    h('div', { class: 'card' },
+      field('算法', algName(c.alg)),
+      field('凭据 ID', c.id, { mono: true, actions: [copyAction(c.id, '凭据 ID')] }),
+      field('用户句柄（User Handle）', c.user_handle, { mono: true, actions: [copyAction(c.user_handle, '用户句柄')] }),
+      field('注册来源', c.origin)),
+  ];
 }

@@ -4,17 +4,17 @@
 
 import {
   state, h, icon, iconButton, api, errText, toast, toastError, renderShell, go, refreshMe, sessionEnded,
-  openModal, confirmDialog, confirmDelete, formDialog, copyText, siteAvatar, userAvatar, credTitle, credAccount,
+  openModal, confirmDialog, chooseDialog, confirmDelete, formDialog, copyText, siteAvatar, userAvatar, credTitle, credAccount,
   fmtDate, fmtDateTime, emptyState, loading, field, formRow, usernameError, roleText,
   lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
 import {
-  pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges,
+  pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges, filterSelect, labelBadge,
 } from '../components.js';
 import {
-  transferCreds, shareCreds, deleteCreds, chooseDialog, forgetCredentials, showCredentials,
+  transferCreds, shareCreds, deleteCreds, forgetCredentials, showCredentials,
 } from './credentials.js';
-import { showAudit, filterSelect } from './audit.js';
+import { showAudit } from './audit.js';
 
 // The server's limits (docs/API.md).
 const MAX_CREATE = 200;
@@ -659,7 +659,7 @@ function credRow(c, meta, actions) {
     h('div', { class: 'item-main' },
       h('div', { class: 'item-title' },
         h('a', { class: 'text', href: '#/credentials/' + encodeURIComponent(c.id), title: credTitle(c) }, credTitle(c)),
-        c.label ? h('span', { class: 'badge gray', title: c.label }, c.label) : null,
+        labelBadge(c),
         credentialBadges(c)),
       h('div', { class: 'item-sub', title: credAccount(c) }, credAccount(c)),
       h('div', { class: 'item-meta' }, meta)),

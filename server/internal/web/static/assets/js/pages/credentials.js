@@ -3,14 +3,15 @@
 // delete. 用户管理 runs the same actions on the passkeys of one user.
 
 import {
-  state, h, icon, iconButton, api, errText, toast, toastError, renderShell, go, openModal, formDialog,
-  siteAvatar, userAvatar, credTitle, credAccount, algName, fmtDate, fmtDateTime,
+  state, h, icon, iconButton, api, errText, toast, toastError, renderShell, go, chooseDialog, formDialog,
+  siteAvatar, userAvatar, credTitle, credAccount, credBrief, fmtDate, fmtDateTime,
   emptyState, loading, field, lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
 import {
-  pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges,
+  pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges, filterChip, filterSelect,
+  labelBadge, labelEditor, credentialTechInfo,
 } from '../components.js';
-import { showAudit, filterChip, filterSelect } from './audit.js';
+import { showAudit } from './audit.js';
 
 const PAGE = 100;
 // The server's limits on one batch (docs/API.md).
@@ -149,10 +150,6 @@ async function setView(patch) {
 /* Actions (shared with users.js)                                      */
 /* ------------------------------------------------------------------ */
 
-function credName(c) {
-  return c.user_name ? `${c.rp_id} · ${c.user_name}` : c.rp_id;
-}
-
 function ownersOf(creds) {
   return [...new Map(creds.map((c) => [c.owner.id, c.owner])).values()];
 }
@@ -170,7 +167,7 @@ function tooMany(creds, users = 1) {
 // batchLabel names failed items in a batch error by passkey and username
 // instead of their IDs.
 function batchLabel(creds, users) {
-  const byId = new Map(creds.map((c) => [c.id, credName(c)]));
+  const byId = new Map(creds.map((c) => [c.id, credBrief(c)]));
   const names = new Map((users || []).map((u) => [u.id, u.username]));
   return (item) => (item.field === 'ids' ? byId.get(item.value) : names.get(item.value)) || '';
 }
@@ -189,31 +186,6 @@ function finish(out, creds, message) {
     || out.results.some((r) => isMe(r.user) || isMe(r.to))) state.creds = null;
   toast(message(out.results));
   return out;
-}
-
-/**
- * chooseDialog asks which of a few ways to go on.
- *
- * @param {{title: string, message: string, choices: {value: string, text: string, primary?: boolean, danger?: boolean}[]}} opts
- * @returns {Promise<string|null>} The chosen value, or null when cancelled.
- */
-export function chooseDialog({ title, message, choices }) {
-  return new Promise((resolve) => {
-    let chosen = null;
-    openModal(title, (close) => [
-      h('div', { class: 'modal-body' }, h('p', null, message)),
-      h('div', { class: 'modal-foot wrap' },
-        h('button', { type: 'button', class: 'btn', onclick: close }, '取消'),
-        choices.map((c) => h('button', {
-          type: 'button',
-          class: 'btn' + (c.primary ? ' btn-primary' : c.danger ? ' btn-danger-outline' : ''),
-          onclick: () => {
-            chosen = c.value;
-            close();
-          },
-        }, c.text))),
-    ], () => resolve(chosen));
-  });
 }
 
 /**
@@ -241,7 +213,7 @@ export async function transferCreds(creds) {
     body: { ids: creds.map((c) => c.id), to: to.id, keep_access: keep.checked },
     title: `转移给 ${to.username}`,
     intro: (keep.checked ? '原主人保留访问，变为被共享人' : '原主人将失去访问') + '；其他人的共享保留。',
-    describe: (r) => `${credName(r.credential)}：${r.from.username} → ${r.to.username}`,
+    describe: (r) => `${credBrief(r.credential)}：${r.from.username} → ${r.to.username}`,
     confirmText: '转移',
     label: batchLabel(creds, picked),
   });
@@ -266,7 +238,7 @@ export async function shareCreds(creds) {
     body: { ids: creds.map((c) => c.id), users: picked.map((u) => u.id) },
     title: '确认共享',
     intro: SHARE_WARNING,
-    describe: (r) => `${credName(r.credential)}（${r.credential.owner.username}）→ ${r.user.username}`,
+    describe: (r) => `${credBrief(r.credential)}（${r.credential.owner.username}）→ ${r.user.username}`,
     confirmText: '共享',
     label: batchLabel(creds, picked),
   });
@@ -274,7 +246,7 @@ export async function shareCreds(creds) {
 }
 
 // unshareCreds revokes the shares of the given users, or asks whose.
-export async function unshareCreds(creds, users) {
+async function unshareCreds(creds, users) {
   if (tooMany(creds)) return null;
   if (!users) {
     const recipients = new Map(creds.flatMap((c) => (c.shared_with || []).map((s) => [s.user.id, s.user])));
@@ -305,7 +277,7 @@ export async function unshareCreds(creds, users) {
     body: users ? { ids, users: users.map((u) => u.id) } : { ids, all: true },
     title: '确认撤销共享',
     intro: '撤销只能阻止对方以后再拉取，不能保证对方没有留存私钥。',
-    describe: (r) => `${credName(r.credential)}：不再共享给 ${r.user.username}`,
+    describe: (r) => `${credBrief(r.credential)}：不再共享给 ${r.user.username}`,
     confirmText: '撤销共享',
     danger: true,
     label: batchLabel(creds, users),
@@ -320,7 +292,7 @@ export async function deleteCreds(creds) {
     body: { ids: creds.map((c) => c.id) },
     title: creds.length > 1 ? `删除 ${creds.length} 个通行密钥` : '删除通行密钥',
     intro: '删除后，主人和被共享的人都不能再用它们登录。此操作无法撤销。',
-    describe: (r) => `${credName(r.credential)}（主人 ${r.credential.owner.username}）`,
+    describe: (r) => `${credBrief(r.credential)}（主人 ${r.credential.owner.username}）`,
     confirmText: '删除',
     danger: true,
     label: batchLabel(creds),
@@ -456,7 +428,7 @@ function listRow(c) {
   h('div', { class: 'item-main' },
     h('div', { class: 'item-title' },
       h('span', { class: 'text', title: credTitle(c) }, credTitle(c)),
-      c.label ? h('span', { class: 'badge gray', title: c.label }, c.label) : null,
+      labelBadge(c),
       credentialBadges(c)),
     h('div', { class: 'item-sub', title: credAccount(c) }, credAccount(c)),
     h('div', { class: 'item-meta', title: c.owner.username }, `主人 ${c.owner.username} · ${lastUsedShort(c.last_used_at)}`)));
@@ -515,45 +487,18 @@ function renderDetail(id) {
       field('创建时间', fmtDateTime(c.created_at)),
       lastUsedField(c.last_used_at),
       field('使用次数', `${c.use_count} 次（所有能用它的人合计）`)),
-    h('h3', { class: 'section-title' }, '技术信息'),
-    h('div', { class: 'card' },
-      field('算法', algName(c.alg)),
-      field('凭据 ID', c.id, { mono: true, actions: [copyAction(c.id, '凭据 ID')] }),
-      field('用户句柄（User Handle）', c.user_handle, { mono: true, actions: [copyAction(c.user_handle, '用户句柄')] }),
-      field('注册来源', c.origin)),
+    credentialTechInfo(c),
     h('div', { class: 'danger-zone' },
       h('button', { type: 'button', class: 'btn btn-danger-outline', onclick: () => act(deleteCreds, [c]) }, icon('trash'), '删除通行密钥')));
 }
 
 function labelCard(c) {
-  const input = h('input', { class: 'input', value: c.label, placeholder: '添加备注，例如“工作号”', maxlength: '200', 'aria-label': '备注' });
-  const save = h('button', { type: 'button', class: 'btn btn-primary btn-sm', disabled: true }, '保存');
-  const submit = async () => {
-    if (input.value === c.label) return;
-    save.disabled = true;
-    try {
-      const data = await api('PATCH', `/admin/credentials/${encodeURIComponent(c.id)}`, { label: input.value });
-      details.set(c.id, data.credential);
-      const items = state.allCreds && state.allCreds.items;
-      const i = items ? items.findIndex((x) => x.id === c.id) : -1;
-      if (i >= 0) items[i] = data.credential;
-      if (c.owner.id === state.me.id) state.creds = null;
-      toast('备注已保存');
-      renderShell();
-    } catch (err) {
-      save.disabled = false;
-      toastError(err);
-    }
-  };
-  input.addEventListener('input', () => {
-    save.disabled = input.value === c.label;
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit();
-  });
-  save.addEventListener('click', submit);
-  return h('div', { class: 'card' },
-    h('div', { class: 'field' }, h('div', { class: 'field-main' },
-      h('div', { class: 'label-edit' }, input, save),
-      h('div', { class: 'form-hint' }, '主人和被共享的人都能看到这条备注。'))));
+  return labelEditor(c, async (label) => {
+    const data = await api('PATCH', `/admin/credentials/${encodeURIComponent(c.id)}`, { label });
+    details.set(c.id, data.credential);
+    const items = state.allCreds && state.allCreds.items;
+    const i = items ? items.findIndex((x) => x.id === c.id) : -1;
+    if (i >= 0) items[i] = data.credential;
+    if (c.owner.id === state.me.id) state.creds = null;
+  }, '主人和被共享的人都能看到这条备注。');
 }

@@ -138,7 +138,7 @@ export function fmtDate(s) {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-export function fmtRelative(s) {
+function fmtRelative(s) {
   if (!s) return '从未使用';
   const diff = Date.now() - Date.parse(s);
   const min = Math.floor(diff / 60000);
@@ -163,6 +163,11 @@ export function credTitle(c) {
 
 export function credAccount(c) {
   return c.user_name || c.user_display_name || '（无用户名）';
+}
+
+// credBrief names a passkey in one line: "github.com · alice".
+export function credBrief(c) {
+  return c.user_name ? `${c.rp_id} · ${c.user_name}` : c.rp_id;
 }
 
 /* ------------------------------------------------------------------ */
@@ -376,6 +381,31 @@ export function confirmDialog({ title, message, confirmText, danger }) {
           },
         }, confirmText || '确定')),
     ], () => resolve(confirmed));
+  });
+}
+
+/**
+ * chooseDialog asks which of a few ways to go on.
+ *
+ * @param {{title: string, message: string, choices: {value: string, text: string, primary?: boolean, danger?: boolean}[]}} opts
+ * @returns {Promise<string|null>} The chosen value, or null when cancelled.
+ */
+export function chooseDialog({ title, message, choices }) {
+  return new Promise((resolve) => {
+    let chosen = null;
+    openModal(title, (close) => [
+      h('div', { class: 'modal-body' }, h('p', null, message)),
+      h('div', { class: 'modal-foot wrap' },
+        h('button', { type: 'button', class: 'btn', onclick: close }, '取消'),
+        choices.map((c) => h('button', {
+          type: 'button',
+          class: 'btn' + (c.primary ? ' btn-primary' : c.danger ? ' btn-danger-outline' : ''),
+          onclick: () => {
+            chosen = c.value;
+            close();
+          },
+        }, c.text))),
+    ], () => resolve(chosen));
   });
 }
 

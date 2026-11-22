@@ -2,12 +2,13 @@
 // them, with details, labels, sharing, transfers and batch actions.
 
 import {
-  state, h, icon, iconButton, api, toast, toastError, renderShell, go, confirmDialog, confirmDelete,
-  siteAvatar, userAvatar, credTitle, credAccount, algName, fmtDateTime,
+  state, h, icon, iconButton, api, toast, go, confirmDialog, confirmDelete,
+  siteAvatar, userAvatar, credTitle, credAccount, credBrief, fmtDateTime,
   emptyState, loading, field, lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
 import {
   pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges,
+  labelBadge, labelEditor, credentialTechInfo,
 } from '../components.js';
 
 const SHARE_WARNING = '共享即交出私钥：对方的插件会拿到这个通行密钥，可以直接用它登录。撤销只能阻止以后再拉取，不能保证对方没有留存。';
@@ -61,15 +62,10 @@ function findCred(id) {
   return state.creds && state.creds.find((c) => c.id === id);
 }
 
-// briefText names a passkey in batch previews: "github.com · alice".
-function briefText(c) {
-  return c.user_name ? `${c.rp_id} · ${c.user_name}` : c.rp_id;
-}
-
 // itemLabel names the passkey of a failed batch item for batchError.
 function itemLabel(item) {
   const c = item.field === 'ids' && findCred(item.value);
-  return c ? briefText(c) : '';
+  return c ? credBrief(c) : '';
 }
 
 // titled lets truncated badges show their full text on hover.
@@ -79,10 +75,6 @@ function titled(badges) {
     b.title = b.textContent;
   }
   return badges;
-}
-
-function labelBadge(c) {
-  return c.label ? titled([h('span', { class: 'badge gray' }, c.label)]) : null;
 }
 
 function matchesCred(c, q) {
@@ -196,7 +188,7 @@ function renderPasskeyList(container, countEl) {
   selectBox(sel, c.id, `${credTitle(c)} ${credAccount(c)}`),
   siteAvatar(c.rp_id, credTitle(c)),
   h('div', { class: 'item-main' },
-    h('div', { class: 'item-title' }, h('span', { class: 'text', title: credTitle(c) }, credTitle(c)), labelBadge(c), titled(credentialBadges(c))),
+    h('div', { class: 'item-title' }, h('span', { class: 'text', title: credTitle(c) }, credTitle(c)), c.label ? titled([labelBadge(c)]) : null, titled(credentialBadges(c))),
     h('div', { class: 'item-sub', title: credAccount(c) }, credAccount(c))));
 
   let ordered = list;
@@ -294,8 +286,8 @@ async function shareCreds(creds) {
     intro: SHARE_WARNING,
     confirmText: '共享',
     describe: (r) => (r.status === 'unchanged'
-      ? `${briefText(r.credential)} 已经共享给了 ${r.user.username}`
-      : `把 ${briefText(r.credential)} 共享给 ${r.user.username}`),
+      ? `${credBrief(r.credential)} 已经共享给了 ${r.user.username}`
+      : `把 ${credBrief(r.credential)} 共享给 ${r.user.username}`),
   });
   if (res) toast(`已共享给 ${users.map((u) => u.username).join('、')}`);
   return res;
@@ -321,8 +313,8 @@ async function transferCreds(creds) {
     confirmText: '转移',
     danger: !keepAccess,
     describe: (r) => (r.status === 'unchanged'
-      ? `${r.to.username} 已经是 ${briefText(r.credential)} 的主人`
-      : `把 ${briefText(r.credential)} 转移给 ${r.to.username}`),
+      ? `${r.to.username} 已经是 ${credBrief(r.credential)} 的主人`
+      : `把 ${credBrief(r.credential)} 转移给 ${r.to.username}`),
   });
   if (res) toast(`已转移给 ${to.username}`);
   return res;
@@ -354,8 +346,8 @@ async function deleteSelected(ids) {
     confirmText: '删除',
     danger: true,
     describe: (r) => (r.status === 'left'
-      ? `退出 ${r.credential.owner.username} 共享的 ${briefText(r.credential)}`
-      : `删除 ${briefText(r.credential)}`),
+      ? `退出 ${r.credential.owner.username} 共享的 ${credBrief(r.credential)}`
+      : `删除 ${credBrief(r.credential)}`),
   });
   if (!res) return;
   sel.clear();
@@ -372,8 +364,8 @@ async function unshareOne(c, user) {
     confirmText: '撤销共享',
     danger: true,
     describe: (r) => (r.status === 'unchanged'
-      ? `${briefText(r.credential)} 没有共享给 ${r.user.username}`
-      : `停止向 ${r.user.username} 共享 ${briefText(r.credential)}`),
+      ? `${credBrief(r.credential)} 没有共享给 ${r.user.username}`
+      : `停止向 ${r.user.username} 共享 ${credBrief(r.credential)}`),
   });
   if (res) toast(`已撤销对 ${user.username} 的共享`);
 }
@@ -427,12 +419,7 @@ function renderCredentialDetail(c) {
       field('创建时间', fmtDateTime(c.created_at)),
       lastUsedField(c.last_used_at),
       field(shared || shareCount(c) ? '使用次数（所有人合计）' : '使用次数', `${c.use_count} 次`)),
-    h('h3', { class: 'section-title' }, '技术信息'),
-    h('div', { class: 'card' },
-      field('算法', algName(c.alg)),
-      field('凭据 ID', c.id, { mono: true, actions: [copyAction(c.id, '凭据 ID')] }),
-      field('用户句柄（User Handle）', c.user_handle, { mono: true, actions: [copyAction(c.user_handle, '用户句柄')] }),
-      field('注册来源', c.origin)),
+    credentialTechInfo(c),
     shared
       ? h('div', { class: 'danger-zone' },
         h('button', {
@@ -471,34 +458,13 @@ function sharedWithMe(c) {
 }
 
 function labelSection(c) {
-  const labelInput = h('input', { class: 'input', value: c.label, placeholder: '添加备注，例如“工作号”', maxlength: '200', 'aria-label': '备注' });
-  const saveBtn = h('button', { type: 'button', class: 'btn btn-primary btn-sm', disabled: true }, '保存');
-  const saveLabel = async () => {
-    if (labelInput.value === c.label) return;
-    saveBtn.disabled = true;
-    try {
-      const data = await api('PATCH', `/credentials/${encodeURIComponent(c.id)}`, { label: labelInput.value });
-      const i = state.creds.findIndex((x) => x.id === c.id);
-      if (i >= 0) state.creds[i] = data.credential;
-      toast('备注已保存');
-      renderShell();
-    } catch (err) {
-      saveBtn.disabled = false;
-      toastError(err);
-    }
-  };
-  labelInput.addEventListener('input', () => {
-    saveBtn.disabled = labelInput.value === c.label;
-  });
-  labelInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') saveLabel();
-  });
-  saveBtn.addEventListener('click', saveLabel);
-
   return [
     h('h3', { class: 'section-title' }, '备注'),
-    h('div', { class: 'card' },
-      h('div', { class: 'field' }, h('div', { class: 'field-main' }, h('div', { class: 'label-edit' }, labelInput, saveBtn)))),
+    labelEditor(c, async (label) => {
+      const data = await api('PATCH', `/credentials/${encodeURIComponent(c.id)}`, { label });
+      const i = state.creds.findIndex((x) => x.id === c.id);
+      if (i >= 0) state.creds[i] = data.credential;
+    }),
   ];
 }
 

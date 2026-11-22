@@ -1,12 +1,11 @@
 // 操作日志 (admin): every recorded change, newest first, filtered by user,
-// kind of action or passkey. 概览 reuses its rows, and the other admin
-// pages its filter widgets.
+// kind of action or passkey. 概览 reuses its rows.
 
 import {
-  state, h, icon, iconButton, api, errText, toastError, renderShell, go, fmtDateTime,
+  state, h, api, errText, toastError, renderShell, go, fmtDateTime,
   singlePage, emptyState, loading,
 } from '../core.js';
-import { pickUsers, eventText } from '../components.js';
+import { pickUsers, eventText, filterChip, filterSelect } from '../components.js';
 
 const PAGE = 50;
 
@@ -143,44 +142,6 @@ export function eventRow(e) {
       h('time', { datetime: e.at }, fmtDateTime(e.at)),
       h('span', null, viaText(e.via)),
       c ? h('a', { href: '#/credentials/' + encodeURIComponent(c.id) }, '查看通行密钥') : null));
-}
-
-/**
- * filterChip is a filter that is set in a dialog: "+ 主人" while unset,
- * "主人：alice ×" once set.
- *
- * @param {string} label
- * @param {string} value     The current value's text, or "" when unset.
- * @param {() => void} onpick   Opens the dialog that sets the filter.
- * @param {() => void} onclear  Clears the filter.
- * @returns {HTMLElement}
- */
-export function filterChip(label, value, onpick, onclear) {
-  if (!value) return h('button', { type: 'button', class: 'chip', onclick: onpick }, icon('plus'), label);
-  return h('span', { class: 'chip active' },
-    h('button', { type: 'button', class: 'chip-text', title: `${label}：${value}`, onclick: onpick }, `${label}：${value}`),
-    iconButton('x', `清除${label}筛选`, onclear, 'chip-x'));
-}
-
-/**
- * filterSelect is a drop-down filter styled like filterChip.
- *
- * @param {string} label  Accessible name.
- * @param {string} value  The selected value; "" means no filter.
- * @param {Array<[string, string] | [string, Array<[string, string]>]>} options
- *   [value, text] pairs; [group label, pairs] makes an option group.
- * @param {(value: string) => void} onchange
- * @returns {HTMLSelectElement}
- */
-export function filterSelect(label, value, options, onchange) {
-  const option = ([v, t]) => h('option', { value: v }, t);
-  const select = h('select', {
-    class: 'select chip-select' + (value ? ' active' : ''),
-    'aria-label': label,
-    onchange: (e) => onchange(e.target.value),
-  }, options.map(([v, t]) => (Array.isArray(t) ? h('optgroup', { label: v }, t.map(option)) : option([v, t]))));
-  select.value = value;
-  return select;
 }
 
 /* ------------------------------------------------------------------ */
