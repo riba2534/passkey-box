@@ -55,12 +55,13 @@
 三种方式，所有需要登录的接口都接受（个别接口不接受令牌，见下文）：
 
 1. **HTTP Basic**：`Authorization: Basic base64(utf8(username + ":" + password))`。扩展每个请求都带这个头。**只有这种方式能拿到凭据私钥**。
-2. **API 令牌**：`Authorization: Bearer pkb_…`。在 Web 后台「Agent 接入」页或 `POST /api/v1/me/tokens` 创建，明文只在创建时返回一次，服务端只保存 SHA-256。令牌继承用户的角色（管理员的令牌能调管理员接口），可以设为只读、可以设过期时间。**令牌永远拿不到私钥**，也不能修改密码或管理令牌。
+2. **API 令牌**：`Authorization: Bearer pkb_…`。在 Web 后台「Agent 接入」页或 `POST /api/v1/me/tokens` 创建，明文只在创建时返回一次，服务端只保存 SHA-256。令牌继承用户的角色（管理员的令牌能调管理员接口），可以设为只读、可以设过期时间。**令牌的响应里永远没有私钥**；令牌不能修改自己用户的密码（包括通过管理员接口），也不能管理令牌。
+   注意：管理员的令牌能做管理员能做的一切，包括创建用户、重置其他用户的密码、转移通行密钥，因此拿到管理员令牌的一方可以间接用 HTTP Basic 取得任何通行密钥。管理员令牌只交给完全信任的 Agent；只需要查询时用只读令牌。
 3. **会话 Cookie**：Web 后台通过 `POST /api/v1/auth/login` 登录后拿到 `pkb_session` Cookie（HttpOnly、SameSite=Lax、Path=/、有效期 30 天；`PKB_COOKIE_SECURE=true` 时加 Secure）。会话也拿不到私钥。
 
 请求带 `Authorization` 头（Basic 或 Bearer）时只用它认证，失败时不会再看 Cookie。被停用的用户无论用哪种方式都得到 403 `account_disabled`。
 
-用户名去掉首尾空白后为 1–64 个字符，大小写不敏感地唯一（`Alice` 和 `alice` 是同一个用户），保存时保留原始大小写。密码至少 1 个字符，服务端用 bcrypt 存储。
+用户名去掉首尾空白后为 1–64 个字符，大小写不敏感地唯一（`Alice` 和 `alice` 是同一个用户），保存时保留原始大小写。密码 1–72 个字节（bcrypt 的上限），服务端用 bcrypt 存储。
 
 ## 数据对象
 
@@ -265,7 +266,7 @@
 
 ### `GET /api/v1/me/activity`
 
-与我有关（我是执行人、受影响的用户或另一方）的操作日志：200 `{"events": [AuditEvent], "next_before": 41}`，新的在前。查询参数 `limit`（默认 50，范围 1–200，越界返回 400）、`before`（只返回 ID 小于它的事件，用上一页的 `next_before` 翻页；没有更多时 `next_before` 为 `null`）。
+与我有关（我是执行人、受影响的用户或另一方）的操作日志。调用者不是管理员时，`user.update` 事件里管理员备注的内容替换为 `"note": true`，只说明备注改过。200 `{"events": [AuditEvent], "next_before": 41}`，新的在前。查询参数 `limit`（默认 50，范围 1–200，越界返回 400）、`before`（只返回 ID 小于它的事件，用上一页的 `next_before` 翻页；没有更多时 `next_before` 为 `null`）。
 
 ### `GET /api/v1/users`
 
@@ -380,7 +381,7 @@
 | `GET /api/v1/admin/users` | 参数 `q`（用户名或备注里的子串，大小写不敏感）、`role`（`admin` / `user`）、`status`（`active` / `disabled`） | 200 `{"users": [User]}`，按 `id` 升序 |
 | `POST /api/v1/admin/users` | `{"username", "password", "is_admin"?, "note"?}` | 201 `{"user": User}`；重名 409 |
 | `GET /api/v1/admin/users/{user_id}` | — | 200 `{"user": User}` |
-| `PATCH /api/v1/admin/users/{user_id}` | `{"username"?, "password"?, "is_admin"?, "disabled"?, "note"?}` | 200 `{"user": User}`。不能取消自己的管理员身份、不能停用自己（400）；改名重名 409。改名后该用户要在扩展里用新用户名重新登录 |
+| `PATCH /api/v1/admin/users/{user_id}` | `{"username"?, "password"?, "is_admin"?, "disabled"?, "note"?}` | 200 `{"user": User}`。不能取消自己的管理员身份、不能停用自己、不能用 API 令牌修改自己的密码（400）；改名重名 409。改名后该用户要在扩展里用新用户名重新登录 |
 | `DELETE /api/v1/admin/users/{user_id}` | — | 204，同时删除该用户拥有的凭据、共享给他的关系、会话和令牌；不能删除自己（400） |
 | `POST /api/v1/admin/users/{user_id}/revoke-sessions` | — | 200 `{"sessions": n, "tokens": n}`：删除该用户的全部会话和 API 令牌。密码不变，扩展的 Basic 认证不受影响；要彻底阻止访问请停用账户或重置密码 |
 | `GET /api/v1/admin/users/{user_id}/credentials` | 参数 `access` 同 `GET /credentials` | 200 `{"credentials": [Credential]}`：该用户拥有的和共享给他的，`access` 相对于该用户 |
@@ -402,7 +403,7 @@
 {"items": [{"user": "u01", "disabled": true}, {"user": 5, "username": "carol", "note": "改名"}, {"user": "u02", "generate_password": true}], "dry_run": false}
 ```
 
-每个条目可以带 `username`、`password`、`generate_password`（与 `password` 互斥）、`is_admin`、`disabled`、`note`。返回 200 `{"dry_run": false, "results": [{"user": User, "changes": ["disabled"], "password": "…"}]}`：`changes` 是实际变化的字段，`password` 只在 `generate_password` 时出现。同一用户在批内出现两次、取消自己的管理员身份或停用自己报条目错误 `invalid_request`。
+每个条目可以带 `username`、`password`、`generate_password`（与 `password` 互斥）、`is_admin`、`disabled`、`note`。返回 200 `{"dry_run": false, "results": [{"user": User, "changes": ["disabled"], "password": "…"}]}`：`changes` 是实际变化的字段，`password` 只在 `generate_password` 时出现。同一用户在批内出现两次、取消自己的管理员身份、停用自己，或者用 API 令牌修改自己的密码，报条目错误 `invalid_request`。
 
 **`POST /api/v1/admin/users/batch-delete`**
 
@@ -451,6 +452,6 @@
 
 ## 数据库升级
 
-数据库结构的版本记在 SQLite 的 `PRAGMA user_version` 里。启动时如果数据库版本低于程序版本，服务端会先用 `VACUUM INTO` 在数据库旁边留一份完整副本（例如 `passkey-box.pre-v1-20261123T010203Z.db`，日志里会打印路径），再在一个事务里升级。升级只增加表、列和索引，不改写已有数据；失败时整体回滚，服务拒绝启动，数据库保持原样。旧版本的程序可以继续打开升级后的数据库，回滚部署不需要恢复数据。
+数据库结构的版本记在 SQLite 的 `PRAGMA user_version` 里。启动时如果数据库版本低于程序版本，服务端会先用 `VACUUM INTO` 在数据库旁边留一份完整副本（例如 `passkey-box.pre-v1-20261123T010203Z.db`，日志里会打印路径），再在一个事务里升级。升级只增加表、列和索引，不改写已有数据；失败时整体回滚，服务拒绝启动，数据库保持原样。旧版本的程序可以继续打开升级后的数据库，回滚部署不需要恢复数据。但旧版本不认识「停用」：回滚后被停用的用户又能登录，回滚前请先重置他们的密码。
 
-0.6.0 起凭据 ID 全站唯一。如果旧数据库里有两个用户存着相同 ID 的凭据，升级会失败并在日志里给出这个 ID，需要先删掉其中一条再启动。
+0.6.0 起凭据 ID 全站唯一。如果旧数据库里有两个用户存着相同 ID 的凭据，升级会在复制数据库之前失败，并在日志里给出这个 ID，需要先删掉其中一条再启动。

@@ -52,12 +52,19 @@ type DeletedUser struct {
 var (
 	errInvalidUsername = Invalid("username must be 1-%d characters", MaxUsernameLen)
 	errEmptyPassword   = Invalid("password must not be empty")
-	errDuplicate       = Invalid("duplicate item")
-	errDemoteSelf      = Invalid("you cannot remove your own administrator role")
-	errDisableSelf     = Invalid("you cannot disable yourself")
-	errDeleteSelf      = Invalid("you cannot delete yourself")
-	errUsernameTaken   = &conflictError{"username already exists"}
+	errLongPassword    = Invalid("password must be at most %d bytes", maxPasswordBytes)
+	// errTokenOwnPassword keeps an API token from renewing itself by changing
+	// its user's password through the administrator endpoints.
+	errTokenOwnPassword = Invalid("an API token cannot change the password of its own user")
+	errDuplicate        = Invalid("duplicate item")
+	errDemoteSelf       = Invalid("you cannot remove your own administrator role")
+	errDisableSelf      = Invalid("you cannot disable yourself")
+	errDeleteSelf       = Invalid("you cannot delete yourself")
+	errUsernameTaken    = &conflictError{"username already exists"}
 )
+
+// maxPasswordBytes is the longest password bcrypt accepts.
+const maxPasswordBytes = 72
 
 // value is the key as the client sent it, for batch error items.
 func (k UserKey) value() any {
@@ -129,6 +136,9 @@ func insertUser(ctx context.Context, q queryer, actor Actor, u NewUser, hash str
 	if u.Password == "" {
 		return User{}, errEmptyPassword
 	}
+	if len(u.Password) > maxPasswordBytes {
+		return User{}, errLongPassword
+	}
 	if err := usernameTaken(ctx, q, key, 0); err != nil {
 		return User{}, err
 	}
@@ -167,6 +177,10 @@ func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUp
 		return UpdatedUser{}, errDisableSelf
 	case u.Password != nil && *u.Password == "":
 		return UpdatedUser{}, errEmptyPassword
+	case u.Password != nil && len(*u.Password) > maxPasswordBytes:
+		return UpdatedUser{}, errLongPassword
+	case u.Password != nil && self && strings.HasPrefix(actor.Via, "token:"):
+		return UpdatedUser{}, errTokenOwnPassword
 	}
 	var (
 		names   = []string{}

@@ -1,0 +1,79 @@
+package api_test
+
+import (
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// An API token must not renew itself by changing its own user's password,
+// through /me/password (sessionOnly) or the administrator endpoints.
+func TestTokenCannotChangeItsOwnPasswordAsAdmin(t *testing.T) {
+	e := newEnv(t)
+	root := e.createUser("root", "pw", true)
+	bob := e.createUser("bob", "pw", false)
+	c := e.bearer(e.createToken(root.ID, "ops", false, nil))
+	self := fmt.Sprintf("/api/v1/admin/users/%d", root.ID)
+
+	c.do("PATCH", self, map[string]any{"password": "new"}).expectError(http.StatusBadRequest, "invalid_request")
+	if got := c.do("POST", "/api/v1/admin/users/batch-update", map[string]any{
+		"items": []any{map[string]any{"user": "root", "password": "new"}}}).items(); !slices.Equal(got, []string{"items[0]=root:invalid_request"}) {
+		t.Fatalf("items = %v", got)
+	}
+	if got := c.do("POST", "/api/v1/admin/users/batch-update", map[string]any{
+		"items": []any{map[string]any{"user": root.ID, "generate_password": true}}, "dry_run": true}).items(); len(got) != 1 {
+		t.Fatalf("items = %v", got)
+	}
+	e.basic("root", "pw").do("GET", "/api/v1/me", nil).expect(http.StatusOK)
+
+	// Other fields of its own user, and other users' passwords, stay allowed:
+	// an administrator's token can do what the administrator can.
+	c.do("PATCH", self, map[string]any{"note": "ops"}).expect(http.StatusOK)
+	c.do("PATCH", fmt.Sprintf("/api/v1/admin/users/%d", bob.ID), map[string]any{"password": "bob2"}).expect(http.StatusOK)
+	e.basic("bob", "bob2").do("GET", "/api/v1/me", nil).expect(http.StatusOK)
+	// With a password or a session the administrator can change their own.
+	e.basic("root", "pw").do("PATCH", self, map[string]any{"password": "pw2"}).expect(http.StatusOK)
+	e.basic("root", "pw2").do("GET", "/api/v1/me", nil).expect(http.StatusOK)
+}
+
+func TestPasswordsLongerThanBcryptAllowsAreInvalid(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("root", "pw", true)
+	admin := e.basic("root", "pw")
+	long := strings.Repeat("p", 73)
+	admin.do("POST", "/api/v1/admin/users", map[string]any{"username": "u", "password": long}).expectError(http.StatusBadRequest, "invalid_request")
+	// The dry run already reports it, per entry, though it skips hashing.
+	if got := admin.do("POST", "/api/v1/admin/users/batch-create", map[string]any{
+		"users":   []any{map[string]any{"username": "ok", "password": strings.Repeat("p", 72)}, map[string]any{"username": "long", "password": long}},
+		"dry_run": true}).items(); !slices.Equal(got, []string{"users[1]=long:invalid_request"}) {
+		t.Fatalf("items = %v", got)
+	}
+	admin.do("PUT", "/api/v1/me/password", map[string]any{"old_password": "pw", "new_password": long}).expectError(http.StatusBadRequest, "invalid_request")
+	e.basic("root", "pw").do("GET", "/api/v1/me", nil).expect(http.StatusOK)
+}
+
+// The note is the administrators' note about a user; the user's own activity
+// says that it changed but not what it says.
+func TestActivityHidesAdministratorNotesFromTheUser(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("root", "pw", true)
+	bob := e.createUser("bob", "pw", false)
+	admin := e.basic("root", "pw")
+	admin.do("PATCH", fmt.Sprintf("/api/v1/admin/users/%d", bob.ID), map[string]any{"note": "leaving next month", "disabled": false, "is_admin": false}).expect(http.StatusOK)
+	admin.do("PATCH", fmt.Sprintf("/api/v1/admin/users/%d", bob.ID), map[string]any{"username": "bobby"}).expect(http.StatusOK)
+
+	body := func(c *client, path string) string {
+		return string(c.do("GET", path, nil).expect(http.StatusOK).body)
+	}
+	mine := body(e.basic("bobby", "pw"), "/api/v1/me/activity")
+	if strings.Contains(mine, "leaving") || !strings.Contains(mine, `"note":true`) || !strings.Contains(mine, `"to":"bobby"`) {
+		t.Fatalf("bob's activity = %s", mine)
+	}
+	for _, path := range []string{"/api/v1/admin/audit", "/api/v1/me/activity", "/api/v1/admin/overview"} {
+		if got := body(admin, path); !strings.Contains(got, `"to":"leaving next month"`) {
+			t.Errorf("administrator's %s lacks the note: %s", path, got)
+		}
+	}
+}

@@ -29,7 +29,8 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 
 - 令牌继承用户的角色：管理员的令牌能调用管理员接口，普通用户的令牌只能操作自己的通行密钥和共享给自己的通行密钥。
 - 令牌**永远拿不到私钥**，响应里没有 `private_key` 字段。
-- 令牌不能修改密码，也不能创建、查看或吊销令牌：`PUT /api/v1/me/password` 和 `/api/v1/me/tokens` 系列接口返回 403 `token_not_allowed`。
+- 令牌不能修改密码，也不能创建、查看或吊销令牌：`PUT /api/v1/me/password` 和 `/api/v1/me/tokens` 系列接口返回 403 `token_not_allowed`；通过管理员接口修改令牌自己用户的密码返回 400。
+- 管理员的令牌能做管理员能做的一切。不要用创建用户、重置密码再用 HTTP Basic 登录的办法绕过「令牌拿不到私钥」，这是安全守则第 2 条明令禁止的。
 - 令牌无效、过期或已被吊销时返回 401 `unauthorized`；账户被停用时返回 403 `account_disabled`；只读令牌发起写请求返回 403 `read_only_token`。遇到这些情况，停下来告诉用户，不要换别的方式重试。
 
 ## 2. 概念
@@ -126,7 +127,7 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 | `GET /api/v1/me/tokens` | — | `{"tokens": [Token]}`。令牌不能调用 |
 | `POST /api/v1/me/tokens` | `{"name", "read_only", "expires_in_days"}` | 201 `{"token": Token, "secret": "pkb_…"}`。令牌不能调用 |
 | `DELETE /api/v1/me/tokens/{token_id}` | — | 204。令牌不能调用 |
-| `GET /api/v1/me/activity` | 参数 `before`、`limit` | `{"events": [AuditEvent], "next_before": 41}`：与我有关（我是执行人、受影响的用户或另一方）的操作日志 |
+| `GET /api/v1/me/activity` | 参数 `before`、`limit` | `{"events": [AuditEvent], "next_before": 41}`：与我有关（我是执行人、受影响的用户或另一方）的操作日志；不是管理员时，管理员备注的内容显示为 `"note": true` |
 | `GET /api/v1/users` | — | `{"users": [UserBrief]}`：所有未停用的用户，按用户名排序，用来选择共享对象 |
 
 ### 通行密钥（当前用户）
@@ -161,7 +162,7 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 | `GET /api/v1/admin/users` | 参数 `q`（用户名或备注里的子串，大小写不敏感）、`role`（`admin`、`user`）、`status`（`active`、`disabled`） | `{"users": [AdminUser]}`，按 ID 升序 |
 | `POST /api/v1/admin/users` | `{"username", "password", "is_admin"?, "note"?}` | 201 `{"user": AdminUser}`；重名 409 |
 | `GET /api/v1/admin/users/{user_id}` | — | `{"user": AdminUser}` |
-| `PATCH /api/v1/admin/users/{user_id}` | `{"username"?, "password"?, "is_admin"?, "disabled"?, "note"?}` | `{"user": AdminUser}`。不能取消自己的管理员身份、不能停用自己（400）；改名重名 409。改名后旧用户名立即失效，该用户要在扩展里用新用户名重新登录 |
+| `PATCH /api/v1/admin/users/{user_id}` | `{"username"?, "password"?, "is_admin"?, "disabled"?, "note"?}` | `{"user": AdminUser}`。不能取消自己的管理员身份、不能停用自己、不能用令牌修改自己的密码（400）；改名重名 409。密码最多 72 个字节。改名后旧用户名立即失效，该用户要在扩展里用新用户名重新登录 |
 | `DELETE /api/v1/admin/users/{user_id}` | — | 204。一并删除他拥有的通行密钥、共享给他的关系、会话和令牌；不能删除自己（400）。要保留他的通行密钥请用 batch-delete 的 `transfer_credentials_to` |
 | `POST /api/v1/admin/users/{user_id}/revoke-sessions` | — | `{"sessions": n, "tokens": n}`：删除他的全部会话和 API 令牌。密码不变，扩展照常可用；要彻底阻止访问请停用账户或重置密码 |
 | `GET /api/v1/admin/users/{user_id}/credentials` | 参数 `access` 同 `GET /api/v1/credentials` | `{"credentials": [Credential]}`：他拥有的和共享给他的，`access` 相对于他 |

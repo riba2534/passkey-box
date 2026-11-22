@@ -92,13 +92,21 @@ func readEventPage(w http.ResponseWriter, q url.Values, f *store.AuditFilter) bo
 
 // writeEvents answers a page of the events f selects. next_before is set when
 // older events remain.
-func (s *Server) writeEvents(w http.ResponseWriter, r *http.Request, f store.AuditFilter) {
+// writeEvents answers a page of events. hideNotes replaces the text of
+// administrators' notes in user.update events with true, for callers who may
+// not read notes.
+func (s *Server) writeEvents(w http.ResponseWriter, r *http.Request, f store.AuditFilter, hideNotes bool) {
 	limit := f.Limit
 	f.Limit++
 	events, err := s.opts.Store.ListAudit(r.Context(), f)
 	if err != nil {
 		s.internalError(w, err)
 		return
+	}
+	if hideNotes {
+		for i := range events {
+			events[i].Detail = withoutNoteText(events[i].Action, events[i].Detail)
+		}
 	}
 	var next *int64
 	if len(events) > limit {
@@ -113,7 +121,28 @@ func (s *Server) handleMyActivity(w http.ResponseWriter, r *http.Request, c *cal
 	if !readEventPage(w, r.URL.Query(), &f) {
 		return
 	}
-	s.writeEvents(w, r, f)
+	// The note is the administrators' note about the user (docs/API.md).
+	s.writeEvents(w, r, f, !c.User.IsAdmin)
+}
+
+// withoutNoteText returns detail with the from/to of a user.update note
+// change replaced by true.
+func withoutNoteText(action string, detail json.RawMessage) json.RawMessage {
+	if action != "user.update" {
+		return detail
+	}
+	var d map[string]json.RawMessage
+	var changes map[string]json.RawMessage
+	if json.Unmarshal(detail, &d) != nil || json.Unmarshal(d["changes"], &changes) != nil || changes["note"] == nil {
+		return detail
+	}
+	changes["note"] = json.RawMessage("true")
+	d["changes"], _ = json.Marshal(changes)
+	out, err := json.Marshal(d)
+	if err != nil {
+		return detail
+	}
+	return out
 }
 
 func (s *Server) handleAdminAudit(w http.ResponseWriter, r *http.Request, _ *caller) {
@@ -129,7 +158,7 @@ func (s *Server) handleAdminAudit(w http.ResponseWriter, r *http.Request, _ *cal
 	if !readEventPage(w, q, &f) {
 		return
 	}
-	s.writeEvents(w, r, f)
+	s.writeEvents(w, r, f, false)
 }
 
 func (s *Server) handleUserDirectory(w http.ResponseWriter, r *http.Request, _ *caller) {
