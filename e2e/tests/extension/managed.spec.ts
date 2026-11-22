@@ -114,3 +114,46 @@ test('owned-only: a profile sharing the account asks before using another profil
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// For a profile without an account, AnyBrowser writes only {"autoLogin":"owned-only"}: the extension keeps the
+// account it signed in with last time, now under owned-only, and a profile that never had one stays signed out.
+test('owned-only without an account: the last account follows the policy, nothing signs in', async ({ stack, headless }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'pkb-policy-only-'));
+  const { username, password } = stack.users.a;
+  const account = { serverUrl: stack.serverUrl, username, password };
+  const profiles: ManagedProfile[] = [];
+  const launch = async (name: string, managed: Record<string, unknown>) => {
+    const profile = await launchManaged(stack, path.join(root, name), managed, headless);
+    profiles.push(profile);
+    return profile;
+  };
+  try {
+    const a = await launch('a', { ...account, autoLogin: 'owned-only' });
+    await a.rp.goto();
+    await a.rp.registerOk('alice');
+
+    // B signed in with the shared account before (0.4.0, or an AnyBrowser account removed since).
+    const before = await launch('b', account);
+    await expect((await openOptions(before, stack)).locator('.status')).toContainText(`已登录 ${username}`);
+    await before.context.close();
+    const b = await launch('b', { autoLogin: 'owned-only' });
+    await b.rp.goto();
+    await b.rp.login();
+    await expect(b.ui.dialog('picker')).toBeVisible();
+    await expect(b.ui.pickerAccounts()).toHaveCount(1);
+    await expect(b.rp.result).toHaveText('pending:login');
+    await b.ui.action('picker', 'cancel').click();
+    await b.rp.expectResult('error:NotAllowedError');
+    const options = await openOptions(b, stack);
+    await expect(options.locator('.status')).toContainText(`已登录 ${username}`);
+    await expect(options.locator('.settings-note')).toBeVisible();
+
+    const c = await launch('c', { autoLogin: 'owned-only' });
+    const signedOut = await openOptions(c, stack);
+    await expect(signedOut.locator('.status')).toHaveText(/尚未登录/);
+    await expect(signedOut.locator('.settings-note')).toBeVisible();
+  } finally {
+    await Promise.all(profiles.map((p) => p.context.close()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

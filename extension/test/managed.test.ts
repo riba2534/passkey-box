@@ -23,9 +23,15 @@ describe("readManagedConfig", () => {
     }
   });
 
-  it("ignores a policy without a complete account", async () => {
-    expect(await readManagedConfig("x", file({ autoLogin: "owned-only" }))).toBeNull();
-    expect(await readManagedConfig("x", file({ ...account, password: "", autoLogin: "owned-only" }))).toBeNull();
+  it("reads the policy without a complete account", async () => {
+    // AnyBrowser writes only the policy for a profile without an account (0.4.0 ignored such a file).
+    expect(await readManagedConfig("x", file({ autoLogin: "owned-only" }))).toEqual({ account: null, policy: ownedOnly });
+    expect(await readManagedConfig("x", file({ ...account, password: "", autoLogin: "owned-only" }))).toEqual({
+      account: null,
+      policy: ownedOnly,
+    });
+    expect(await readManagedConfig("x", file({ autoLogin: "unknown" }))).toEqual({ account: null, policy: any });
+    expect(await readManagedConfig("x", file({}))).toEqual({ account: null, policy: any });
   });
 
   it("ignores a missing file", async () => {
@@ -33,19 +39,24 @@ describe("readManagedConfig", () => {
     expect(await readManagedConfig("x", file({}, false))).toBeNull();
   });
 
-  it("ignores malformed or incomplete content", async () => {
+  it("ignores content that is not a JSON object", async () => {
     const broken = async () => ({ ok: true, json: async () => Promise.reject(new SyntaxError("bad json")) });
     expect(await readManagedConfig("x", broken)).toBeNull();
     expect(await readManagedConfig("x", file(null))).toBeNull();
     expect(await readManagedConfig("x", file("text"))).toBeNull();
-    expect(await readManagedConfig("x", file({ serverUrl: "https://pk.example.com", username: "alice" }))).toBeNull();
-    expect(await readManagedConfig("x", file({ serverUrl: "https://pk.example.com", username: " ", password: "pw" }))).toBeNull();
-    expect(await readManagedConfig("x", file({ serverUrl: "https://pk.example.com", username: "alice", password: 1 }))).toBeNull();
+    expect(await readManagedConfig("x", file([{ ...account, autoLogin: "owned-only" }]))).toBeNull();
+  });
+
+  it("has no account to sign in with when it is incomplete", async () => {
+    const accountOf = async (fields: unknown) => (await readManagedConfig("x", file(fields)))?.account;
+    expect(await accountOf({ serverUrl: "https://pk.example.com", username: "alice" })).toBeNull();
+    expect(await accountOf({ serverUrl: "https://pk.example.com", username: " ", password: "pw" })).toBeNull();
+    expect(await accountOf({ serverUrl: "https://pk.example.com", username: "alice", password: 1 })).toBeNull();
   });
 
   it("accepts only http(s) servers", async () => {
-    expect(await readManagedConfig("x", file({ ...account, serverUrl: "ftp://pk.example.com" }))).toBeNull();
-    expect(await readManagedConfig("x", file({ ...account, serverUrl: "http://exa mple" }))).toBeNull();
+    expect((await readManagedConfig("x", file({ ...account, serverUrl: "ftp://pk.example.com" })))?.account).toBeNull();
+    expect((await readManagedConfig("x", file({ ...account, serverUrl: "http://exa mple" })))?.account).toBeNull();
     expect((await readManagedConfig("x", file({ ...account, serverUrl: "http://127.0.0.1:8080" })))?.account).toEqual({
       ...account,
       serverUrl: "http://127.0.0.1:8080",
@@ -97,6 +108,18 @@ describe("applyManagedConfig", () => {
     const disable = storage({ config: { ...account }, policy: ownedOnly });
     expect(await applyManagedConfig({ account, policy: any }, disable)).toBe(true);
     expect(disable.savePolicy).toHaveBeenCalledWith(any);
+  });
+
+  it("a file with only the policy stores it and keeps the stored account", async () => {
+    for (const stored of [{ ...account, username: "bob" }, null]) {
+      const s = storage({ config: stored, policy: any });
+      expect(await applyManagedConfig({ account: null, policy: ownedOnly }, s)).toBe(true);
+      expect(s.savePolicy).toHaveBeenCalledWith(ownedOnly);
+      expect(s.saveConfig).not.toHaveBeenCalled();
+    }
+    const unchanged = storage({ config: { ...account }, policy: ownedOnly });
+    expect(await applyManagedConfig({ account: null, policy: ownedOnly }, unchanged)).toBe(false);
+    expect(unchanged.savePolicy).not.toHaveBeenCalled();
   });
 
   it("stores account and policy together for a new account", async () => {

@@ -1,8 +1,10 @@
 // Managed sign-in: a launcher that loads an unpacked copy of the extension (such as AnyBrowser)
-// can place managed-config.json next to manifest.json. When the file holds a complete account,
-// the extension signs in with it at startup, replacing any stored account, and stores the
-// launcher's sign-in policy with it. Without a usable file both stay as they were, so a profile
-// the launcher no longer manages keeps its last account and policy; signing out keeps the policy.
+// can place managed-config.json next to manifest.json. At startup the extension stores the
+// launcher's sign-in policy from the file and, when the file holds a complete account, signs in
+// with it, replacing any stored account. A file with only the policy keeps the stored account, so
+// a profile whose launcher account was removed keeps its last account under the launcher's
+// policy. A missing file, or one that is not a JSON object, leaves both as they were; signing out
+// keeps the policy.
 
 import { isConfigComplete, normalizeServerUrl, type Config } from "./config";
 
@@ -22,7 +24,8 @@ export interface ManagedPolicy {
 }
 
 export interface ManagedConfig {
-  account: Config;
+  /** null when the file holds no complete account: nothing to sign in with. */
+  account: Config | null;
   policy: ManagedPolicy;
 }
 
@@ -34,19 +37,8 @@ export function normalizePolicy(value: unknown): ManagedPolicy {
 
 type FetchFile = (url: string) => Promise<Pick<Response, "ok" | "json">>;
 
-/** Reads the managed account and policy; a missing, unreadable or incomplete file yields null. */
-export async function readManagedConfig(url: string, fetchFile: FetchFile = (u) => fetch(u, { cache: "no-store" })): Promise<ManagedConfig | null> {
-  let value: unknown;
-  try {
-    const response = await fetchFile(url);
-    if (!response.ok) return null;
-    value = await response.json();
-  } catch {
-    // Chromium rejects requests for files the extension package does not contain.
-    return null;
-  }
-  if (!value || typeof value !== "object") return null;
-  const fields = value as Record<string, unknown>;
+/** The account in managed-config.json, or null unless all three fields are usable. */
+function managedAccount(fields: Record<string, unknown>): Config | null {
   const account = {
     serverUrl: typeof fields["serverUrl"] === "string" ? normalizeServerUrl(fields["serverUrl"]) : "",
     username: typeof fields["username"] === "string" ? fields["username"].trim() : "",
@@ -59,14 +51,30 @@ export async function readManagedConfig(url: string, fetchFile: FetchFile = (u) 
   } catch {
     return null;
   }
-  return { account, policy: normalizePolicy(fields) };
+  return account;
+}
+
+/** Reads the managed policy and account; a missing file or one that is not a JSON object yields null. */
+export async function readManagedConfig(url: string, fetchFile: FetchFile = (u) => fetch(u, { cache: "no-store" })): Promise<ManagedConfig | null> {
+  let value: unknown;
+  try {
+    const response = await fetchFile(url);
+    if (!response.ok) return null;
+    value = await response.json();
+  } catch {
+    // Chromium rejects requests for files the extension package does not contain.
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fields = value as Record<string, unknown>;
+  return { account: managedAccount(fields), policy: normalizePolicy(fields) };
 }
 
 export function sameConfig(a: unknown, b: Config): boolean {
   return isConfigComplete(a) && a.serverUrl === b.serverUrl && a.username === b.username && a.password === b.password;
 }
 
-/** Stores the managed account and policy unless they are already the stored ones. Returns whether it saved. */
+/** Stores the managed policy, and the account if there is one, unless already stored. Returns whether it saved. */
 export async function applyManagedConfig(
   managed: ManagedConfig,
   storage: {
@@ -78,7 +86,7 @@ export async function applyManagedConfig(
 ): Promise<boolean> {
   const [config, policy] = await Promise.all([storage.loadConfig(), storage.loadPolicy()]);
   const writes: Array<Promise<void>> = [];
-  if (!sameConfig(config, managed.account)) writes.push(storage.saveConfig(managed.account));
+  if (managed.account && !sameConfig(config, managed.account)) writes.push(storage.saveConfig(managed.account));
   if (policy.autoLogin !== managed.policy.autoLogin) writes.push(storage.savePolicy(managed.policy));
   await Promise.all(writes);
   return writes.length > 0;

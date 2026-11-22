@@ -184,7 +184,7 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 { "serverUrl": "https://passkey.example.com", "username": "alice", "password": "…", "autoLogin": "owned-only" }
 ```
 
-扩展每次启动时读取这个文件，账号三项齐全就用它登录，覆盖之前保存的账号；文件不存在或账号不完整时保持原样。文件里是明文密码，请只放在当前用户可读的目录。
+扩展每次启动时读取这个文件，账号三项齐全就用它登录，覆盖之前保存的账号；账号不完整时不登录，保留之前保存的账号，但 `autoLogin` 照样生效；文件不存在时一切保持原样。文件里是明文密码，请只放在当前用户可读的目录。
 
 可选的 `autoLogin` 决定哪些通行密钥可以不经选择直接登录：
 
@@ -193,7 +193,7 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 | `"any"`，缺省或无法识别时也按它处理 | 与未预置账号时相同，见[登录时用哪个账号](#登录时用哪个账号) |
 | `"owned-only"` | 只自动使用在本浏览器 Profile 注册或用过的通行密钥。其他账号即使是唯一候选，也先弹出选择框，页面打开时的自动填充请求也一样；选过一次后，下次直接登录。两个设置开关照常生效。 |
 
-多个 Profile 共用一个 Passkey Box 账号时（AnyBrowser 默认写入 `"owned-only"`），这样可以避免一个 Profile 静默登录成另一个 Profile 注册的网站账号。策略和账号一起保存在扩展里：文件被移除后，扩展保留上次的账号和策略，退出登录也不清除策略；文件重新出现时以文件为准。策略为 `"owned-only"` 时，弹出窗口和选项页的设置里会显示一行说明。
+多个 Profile 共用一个 Passkey Box 账号时（AnyBrowser 默认写入 `"owned-only"`），这样可以避免一个 Profile 静默登录成另一个 Profile 注册的网站账号。没有账号的 Profile 可以只写 `{ "autoLogin": "owned-only" }`（AnyBrowser 移除账号后就是这样做的），扩展继续使用上次登录的账号，并按 owned-only 处理。策略保存在扩展里：文件被移除后，扩展保留上次的账号和策略，退出登录也不清除策略；文件重新出现时以文件为准。策略为 `"owned-only"` 时，弹出窗口和选项页的设置里会显示一行说明。
 
 ## 工作原理
 
