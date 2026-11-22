@@ -72,7 +72,7 @@ svg { display: block; }
   transition: background .12s, border-color .12s, box-shadow .12s;
 }
 .btn:hover { background: var(--bg-hover); }
-.btn:focus-visible, .icon-btn:focus-visible, .nav-item:focus-visible, .list-item:focus-visible {
+.btn:focus-visible, .icon-btn:focus-visible, .nav-item:focus-visible, .list-item:focus-visible, .cf-type-btn:focus-visible {
   outline: 2px solid var(--primary); outline-offset: 2px;
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -516,9 +516,6 @@ label.select-all { cursor: pointer; }
 
 /* ---------- Names and custom fields (components.js) ---------- */
 
-/* A section title with a button on its right. */
-.section-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
-.section-bar .section-title { margin: 0 0 0 2px; }
 .icon-btn:disabled { opacity: .35; cursor: default; background: transparent; color: var(--text-2); }
 
 .cf-row { align-items: flex-start; }
@@ -576,7 +573,7 @@ label.select-all { cursor: pointer; }
 .cf-input-wrap .input { padding-right: 42px; }
 .cf-input-wrap .icon-btn { position: absolute; top: 3px; right: 3px; }
 .cf-masked { -webkit-text-security: disc; }
-.cf-hint { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
+.cf-hint { overflow-wrap: anywhere; }
 .cf-hint.bad { color: var(--danger); }
 .cf-hint:empty { display: none; }
 .cf-preview { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; color: var(--text-2); }
@@ -592,7 +589,6 @@ label.select-all { cursor: pointer; }
   font-size: 12px; font-weight: 500;
 }
 .cf-type-btn:hover { border-color: var(--primary-soft-strong); background: var(--primary-soft); color: var(--primary); }
-.cf-type-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .cf-type-btn .icon { width: 18px; height: 18px; }
 .cf-add-cancel { margin-top: 8px; }
 

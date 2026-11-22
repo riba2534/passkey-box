@@ -755,7 +755,7 @@ function telHref(v) {
 // sectionHead is a section title, with a button on its right if given.
 function sectionHead(title, button) {
   const t = h('h3', { class: 'section-title' }, title);
-  return button ? h('div', { class: 'section-bar' }, t, button) : t;
+  return button ? h('div', { class: 'user-section-head' }, t, button) : t;
 }
 
 // badField reads the index of the field the server refused and why from a
@@ -1068,8 +1068,8 @@ function editFields(c, save) {
 
   const editorRow = (d, i) => {
     const t = typeOf(d);
-    const labelHint = h('div', { class: 'cf-hint bad' });
-    const valueHint = h('div', { class: 'cf-hint' });
+    const labelHint = h('div', { class: 'form-hint cf-hint bad' });
+    const valueHint = h('div', { class: 'form-hint cf-hint' });
     const label = h('input', {
       class: 'input', value: d.label, placeholder: `字段名，留空时显示“${t.name}”`,
       'aria-label': '字段名', autocomplete: 'off', 'data-role': 'label',
