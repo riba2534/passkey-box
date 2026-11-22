@@ -65,11 +65,11 @@ func (c *credentialRequest) validate() string {
 	return ""
 }
 
-func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request, user store.User) {
-	s.writeCredentials(w, r, user.ID)
+func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request, c *caller) {
+	s.writeCredentials(w, r, c, c.User.ID)
 }
 
-func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID int64) {
+func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, c *caller, userID int64) {
 	rpID := strings.TrimSpace(r.URL.Query().Get("rp_id"))
 	creds, err := s.opts.Store.ListCredentials(r.Context(), userID, rpID)
 	if err != nil {
@@ -79,7 +79,7 @@ func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": newCredentialViews(creds)})
 }
 
-func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
 	var req credentialRequest
 	if !readJSON(w, r, &req) {
 		return
@@ -88,7 +88,7 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, msg)
 		return
 	}
-	cred, err := s.opts.Store.SaveCredential(r.Context(), user.ID, store.Credential{
+	cred, err := s.opts.Store.SaveCredential(r.Context(), c.User.ID, store.Credential{
 		ID:              req.ID,
 		RPID:            req.RPID,
 		RPName:          req.RPName,
@@ -113,7 +113,7 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusCreated, map[string]any{"credential": newCredentialView(cred)})
 }
 
-func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
 	var req struct {
 		Label *string `json:"label"`
 	}
@@ -124,7 +124,7 @@ func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, "label is required")
 		return
 	}
-	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), user.ID, r.PathValue("id"), *req.Label)
+	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), c.User.ID, r.PathValue("id"), *req.Label)
 	if errors.Is(err, store.ErrNotFound) {
 		credentialNotFound(w)
 		return
@@ -136,13 +136,13 @@ func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, map[string]any{"credential": newCredentialView(cred)})
 }
 
-func (s *Server) handleUseCredential(w http.ResponseWriter, r *http.Request, user store.User) {
-	err := s.opts.Store.MarkCredentialUsed(r.Context(), user.ID, r.PathValue("id"), s.opts.Now())
+func (s *Server) handleUseCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	err := s.opts.Store.MarkCredentialUsed(r.Context(), c.User.ID, r.PathValue("id"), s.opts.Now())
 	s.writeNoContent(w, err, credentialNotFound)
 }
 
-func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, user store.User) {
-	err := s.opts.Store.DeleteCredential(r.Context(), user.ID, r.PathValue("id"))
+func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	err := s.opts.Store.DeleteCredential(r.Context(), c.User.ID, r.PathValue("id"))
 	s.writeNoContent(w, err, credentialNotFound)
 }
 
@@ -160,4 +160,8 @@ func (s *Server) writeNoContent(w http.ResponseWriter, err error, notFound func(
 	default:
 		s.internalError(w, err)
 	}
+}
+
+func (s *Server) handleGetCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	notImplemented(w)
 }

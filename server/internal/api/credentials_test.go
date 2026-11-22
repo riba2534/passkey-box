@@ -225,10 +225,11 @@ func TestCredentialsAreIsolatedBetweenUsers(t *testing.T) {
 	bob.do("POST", "/api/v1/credentials/YWxpY2U/use", nil).expectError(http.StatusNotFound, "not_found")
 	bob.do("DELETE", "/api/v1/credentials/YWxpY2U", nil).expectError(http.StatusNotFound, "not_found")
 
-	// IDs are unique per user only, and bob registering the same account on
+	// IDs are unique across users, and bob registering the same account on
 	// the same site must not overwrite alice's credential.
-	bob.do("POST", "/api/v1/credentials", newCred("YWxpY2U", "github.com", "YQ")).expect(http.StatusCreated)
-	bob.do("DELETE", "/api/v1/credentials/YWxpY2U", nil).expect(http.StatusNoContent)
+	bob.do("POST", "/api/v1/credentials", newCred("YWxpY2U", "github.com", "YQ")).expectError(http.StatusConflict, "conflict")
+	bob.do("POST", "/api/v1/credentials", newCred("Ym9i", "github.com", "YQ")).expect(http.StatusCreated)
+	bob.do("DELETE", "/api/v1/credentials/Ym9i", nil).expect(http.StatusNoContent)
 
 	list := alice.do("GET", "/api/v1/credentials", nil).credentials()
 	if len(list) != 1 || list[0].Label != "" || list[0].UseCount != 0 {

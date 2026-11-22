@@ -32,7 +32,7 @@ func (s *Server) targetUser(w http.ResponseWriter, r *http.Request) (store.User,
 	return user, true
 }
 
-func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request, _ store.User) {
+func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request, _ *caller) {
 	users, err := s.opts.Store.ListUsers(r.Context())
 	if err != nil {
 		s.internalError(w, err)
@@ -41,7 +41,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request, _ 
 	writeJSON(w, http.StatusOK, map[string]any{"users": newUserViews(users)})
 }
 
-func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _ store.User) {
+func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _ *caller) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -57,7 +57,7 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request, _
 	writeJSON(w, http.StatusCreated, map[string]any{"user": newUserView(user)})
 }
 
-func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, me store.User) {
+func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, c *caller) {
 	var req struct {
 		Password *string `json:"password"`
 		IsAdmin  *bool   `json:"is_admin"`
@@ -72,7 +72,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, m
 	if req.Password != nil && !validPassword(w, *req.Password) {
 		return
 	}
-	if req.IsAdmin != nil && !*req.IsAdmin && target.ID == me.ID {
+	if req.IsAdmin != nil && !*req.IsAdmin && target.ID == c.User.ID {
 		badRequest(w, "you cannot remove your own administrator role")
 		return
 	}
@@ -97,32 +97,15 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, m
 	writeJSON(w, http.StatusOK, map[string]any{"user": newUserView(user)})
 }
 
-func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, me store.User) {
+func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, c *caller) {
 	target, ok := s.targetUser(w, r)
 	if !ok {
 		return
 	}
-	if target.ID == me.ID {
+	if target.ID == c.User.ID {
 		badRequest(w, "you cannot delete yourself")
 		return
 	}
 	err := s.opts.Store.DeleteUser(r.Context(), target.ID)
 	s.writeNoContent(w, err, userNotFound)
-}
-
-func (s *Server) handleAdminListCredentials(w http.ResponseWriter, r *http.Request, _ store.User) {
-	target, ok := s.targetUser(w, r)
-	if !ok {
-		return
-	}
-	s.writeCredentials(w, r, target.ID)
-}
-
-func (s *Server) handleAdminDeleteCredential(w http.ResponseWriter, r *http.Request, _ store.User) {
-	target, ok := s.targetUser(w, r)
-	if !ok {
-		return
-	}
-	err := s.opts.Store.DeleteCredential(r.Context(), target.ID, r.PathValue("id"))
-	s.writeNoContent(w, err, credentialNotFound)
 }

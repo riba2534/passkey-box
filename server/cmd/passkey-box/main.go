@@ -40,6 +40,13 @@ func run() error {
 		return err
 	}
 	defer st.Close()
+	if m := st.Migration; m.From != m.To {
+		if m.Snapshot != "" {
+			log.Printf("migrated database schema %d -> %d; copy of the previous database: %s", m.From, m.To, m.Snapshot)
+		} else {
+			log.Printf("initialised database schema %d", m.To)
+		}
+	}
 
 	if cfg.BootstrapAdmin() {
 		created, err := st.EnsureAdmin(context.Background(), cfg.AdminUsername, cfg.AdminPassword, time.Now())

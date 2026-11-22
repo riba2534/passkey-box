@@ -76,12 +76,28 @@ func (e *env) createUser(username, password string, isAdmin bool) store.User {
 	return u
 }
 
-// client issues requests either with HTTP Basic credentials or with a cookie jar.
+// client issues requests with HTTP Basic credentials, an API token or a cookie jar.
 type client struct {
 	e          *env
 	user, pass string
 	basic      bool
+	token      string
 	http       *http.Client
+}
+
+// bearer returns a client that sends "Authorization: Bearer <token>".
+func (e *env) bearer(token string) *client {
+	return &client{e: e, token: token, http: &http.Client{}}
+}
+
+// createToken issues an API token for the user directly in the store.
+func (e *env) createToken(userID int64, name string, readOnly bool, expiresAt *time.Time) string {
+	e.t.Helper()
+	_, secret, err := e.store.CreateToken(context.Background(), store.SystemActor, userID, name, readOnly, expiresAt, e.clock())
+	if err != nil {
+		e.t.Fatalf("create token: %v", err)
+	}
+	return secret
 }
 
 func (e *env) basic(user, pass string) *client {
@@ -128,6 +144,9 @@ func (c *client) do(method, path string, body any) *response {
 	}
 	if c.basic {
 		req.SetBasicAuth(c.user, c.pass)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	res, err := c.http.Do(req)
 	if err != nil {

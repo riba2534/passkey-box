@@ -65,6 +65,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, err)
 		return
 	}
+	if user.Disabled {
+		accountDisabled(w)
+		return
+	}
 	if err := s.startSession(w, r, user); err != nil {
 		s.internalError(w, err)
 		return
@@ -103,11 +107,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"user": newUserView(user)})
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, user store.User) {
-	writeJSON(w, http.StatusOK, map[string]any{"user": newUserView(user)})
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, c *caller) {
+	auth := map[string]any{"method": c.Method, "read_only": c.readOnly(), "token": nil}
+	if c.Token != nil {
+		auth["token"] = newTokenView(*c.Token)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": newUserView(c.User), "auth": auth})
 }
 
-func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, c *caller) {
+	user := c.User
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
