@@ -70,5 +70,16 @@ describe("settingsPanel", () => {
     conditional.checked = true;
     conditional.dispatchEvent(new Event("change"));
     expect(onChange).toHaveBeenLastCalledWith({ autoLoginSingle: false, conditionalAutoLogin: true });
+    expect(panel.querySelector(".settings-note")).toBeNull();
+  });
+
+  it("explains the launcher's owned-only policy below the switches", () => {
+    const settings = { autoLoginSingle: true, conditionalAutoLogin: true };
+    expect(settingsPanel(document, settings, vi.fn(), "any").querySelector(".settings-note")).toBeNull();
+    const panel = settingsPanel(document, settings, vi.fn(), "owned-only");
+    const note = panel.querySelector('.settings-note[data-policy="owned-only"]');
+    expect(note?.textContent).toBe("由启动器（如 AnyBrowser）管理：只自动使用在本浏览器 Profile 注册或用过的通行密钥，其他账号先在选择框里选一次。");
+    expect(panel.lastElementChild).toBe(note);
+    expect(panel.querySelectorAll("[data-setting]")).toHaveLength(2);
   });
 });

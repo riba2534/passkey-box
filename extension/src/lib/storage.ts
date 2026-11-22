@@ -1,6 +1,7 @@
-// chrome.storage.local access for pkb_config / pkb_settings (CONTRACT 4.3) and pkb_owned.
+// chrome.storage.local access for pkb_config / pkb_settings (CONTRACT 4.3), pkb_owned and pkb_managed.
 
 import { CONFIG_KEY, SETTINGS_KEY, isConfigComplete, normalizeSettings, type Config, type Settings } from "./config";
+import { MANAGED_KEY, normalizePolicy, type ManagedPolicy } from "./managed";
 import { normalizeOwned, OWNED_KEY, rememberCredential, type OwnedCredentials } from "./owned";
 
 export async function loadConfig(): Promise<Config | null> {
@@ -12,9 +13,17 @@ export async function saveConfig(config: Config): Promise<void> {
   await chrome.storage.local.set({ [CONFIG_KEY]: config });
 }
 
-/** Signing out also forgets which credentials this profile registered or used. */
+/** Signing out also forgets which credentials this profile registered or used; the launcher's policy stays. */
 export async function clearConfig(): Promise<void> {
   await chrome.storage.local.remove([CONFIG_KEY, OWNED_KEY]);
+}
+
+export async function loadPolicy(): Promise<ManagedPolicy> {
+  return normalizePolicy((await chrome.storage.local.get(MANAGED_KEY))[MANAGED_KEY]);
+}
+
+export async function savePolicy(policy: ManagedPolicy): Promise<void> {
+  await chrome.storage.local.set({ [MANAGED_KEY]: policy });
 }
 
 export async function loadSettings(): Promise<Settings> {

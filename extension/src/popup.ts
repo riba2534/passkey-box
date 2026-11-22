@@ -3,8 +3,9 @@
 import { describeError, ServerClient, type Credential } from "./lib/api";
 import { CONFIG_KEY, type Config, type Settings } from "./lib/config";
 import { verifyLogin } from "./lib/login";
+import { MANAGED_KEY, type ManagedPolicy } from "./lib/managed";
 import { credentialTitle, formatTime, groupCredentials, serverHost, siteUrl, tabHostname } from "./lib/popup-model";
-import { clearConfig, loadConfig, loadSettings, saveConfig, saveSettings } from "./lib/storage";
+import { clearConfig, loadConfig, loadPolicy, loadSettings, saveConfig, saveSettings } from "./lib/storage";
 import { avatar } from "./ui/avatar";
 import { button, h, icon } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
@@ -64,7 +65,7 @@ interface MainState {
   error: string;
 }
 
-function renderMain(config: Config, settings: Settings, hostname: string): void {
+function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, hostname: string): void {
   const client = new ServerClient(config);
   const state: MainState = { settings, query: "", credentials: null, error: "" };
   const view = h(document, "main", { class: "view" });
@@ -256,10 +257,15 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
     topbar.hidden = true;
     view.replaceChildren(
       backBar("设置"),
-      settingsPanel(document, state.settings, async (next) => {
-        state.settings = next;
-        await saveSettings(next);
-      }),
+      settingsPanel(
+        document,
+        state.settings,
+        async (next) => {
+          state.settings = next;
+          await saveSettings(next);
+        },
+        policy.autoLogin,
+      ),
     );
   }
 }
@@ -267,13 +273,13 @@ function renderMain(config: Config, settings: Settings, hostname: string): void 
 // ---------------------------------------------------------------- boot
 
 async function main(): Promise<void> {
-  const [config, settings, hostname] = await Promise.all([loadConfig(), loadSettings(), activeTabHostname()]);
-  if (config) renderMain(config, settings, hostname);
+  const [config, settings, policy, hostname] = await Promise.all([loadConfig(), loadSettings(), loadPolicy(), activeTabHostname()]);
+  if (config) renderMain(config, settings, policy, hostname);
   else renderLogin();
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && CONFIG_KEY in changes) void main();
+  if (area === "local" && (CONFIG_KEY in changes || MANAGED_KEY in changes)) void main();
 });
 
 void main();

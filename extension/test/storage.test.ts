@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CONFIG_KEY, SETTINGS_KEY } from "../src/lib/config";
+import { MANAGED_KEY } from "../src/lib/managed";
 import { OWNED_KEY } from "../src/lib/owned";
-import { clearConfig, loadOwned, rememberOwned } from "../src/lib/storage";
+import { clearConfig, loadOwned, loadPolicy, rememberOwned, savePolicy } from "../src/lib/storage";
 
 let data: Record<string, unknown>;
 const local = {
@@ -49,5 +50,25 @@ describe("pkb_owned storage", () => {
     await expect(rememberOwned("a")).rejects.toThrow("quota exceeded");
     await rememberOwned("b");
     expect(Object.keys(data[OWNED_KEY] as object)).toEqual(["b"]);
+  });
+});
+
+describe("pkb_managed storage", () => {
+  it("stores the launcher's policy; nothing stored means any", async () => {
+    expect(await loadPolicy()).toEqual({ autoLogin: "any" });
+    await savePolicy({ autoLogin: "owned-only" });
+    expect(data[MANAGED_KEY]).toEqual({ autoLogin: "owned-only" });
+    expect(await loadPolicy()).toEqual({ autoLogin: "owned-only" });
+    data[MANAGED_KEY] = { autoLogin: "unknown" };
+    expect(await loadPolicy()).toEqual({ autoLogin: "any" });
+  });
+
+  it("signing out keeps the policy", async () => {
+    data = { [CONFIG_KEY]: { serverUrl: "https://pk.example.com", username: "alice", password: "pw" } };
+    await savePolicy({ autoLogin: "owned-only" });
+    await rememberOwned("a");
+    await clearConfig();
+    expect(Object.keys(data)).toEqual([MANAGED_KEY]);
+    expect(await loadPolicy()).toEqual({ autoLogin: "owned-only" });
   });
 });

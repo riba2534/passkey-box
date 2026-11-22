@@ -5,6 +5,7 @@ import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlg
 import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
 import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "./decision";
+import type { ManagedPolicy } from "./managed";
 import type { OwnedCredentials } from "./owned";
 import { requestedRpId, type BackgroundRequest, type BackgroundResponse, type CandidateSummary } from "./protocol";
 import { effectiveRpId, hostMatchesRpId } from "./rpid";
@@ -24,6 +25,8 @@ export interface OwnedStore {
 export interface HandlerDeps {
   loadConfig(): Promise<Config | null>;
   loadSettings(): Promise<Settings>;
+  /** The launcher's policy from managed-config.json (managed.ts). */
+  loadPolicy(): Promise<ManagedPolicy>;
   store(config: Config): CredentialStore;
   owned: OwnedStore;
   signal?: AbortSignal;
@@ -76,11 +79,13 @@ async function handleGet(
     if (!chosen) return { action: "error", message: "所选的通行密钥已不存在，请重试。" };
   } else {
     // Accounts this browser profile registered or used come first; a single one of them signs in
-    // like the only candidate. Without the record, every account is treated alike.
+    // like the only candidate, and under the owned-only policy only such an account signs in by
+    // itself. Without the record, no account counts as one of them.
     const owned = await deps.owned.load().catch(() => new Map<string, number>());
     const ranked = rankOwnedFirst(candidates, owned);
     const ownedCount = ranked.filter((c) => owned.has(c.id)).length;
-    const decision = decideGet(candidates.length, req.mediation, await deps.loadSettings(), ownedCount);
+    const [settings, policy] = await Promise.all([deps.loadSettings(), deps.loadPolicy()]);
+    const decision = decideGet(candidates.length, req.mediation, settings, ownedCount, policy.autoLogin);
     if (decision === "pending") return { action: "pending" };
     if (decision === "empty") return { action: "empty" };
     if (decision === "picker") return { action: "picker", candidates: ranked.map((c) => summarize(c, owned)) };
