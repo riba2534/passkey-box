@@ -106,10 +106,16 @@ svg { display: block; }
 }
 .input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(5, 114, 236, .18); }
 .input::placeholder { color: var(--text-3); }
+.input-select {
+  padding-right: 32px; cursor: pointer; appearance: none; -webkit-appearance: none;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235E6470' stroke-width='1.6'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 10px center / 14px;
+}
 
 .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .form-row label { font-size: 13px; font-weight: 500; color: var(--text-2); }
 .form-error { color: var(--danger); font-size: 13px; min-height: 20px; margin: -4px 0 8px; }
+.form-hint { font-size: 12px; color: var(--text-3); }
+.textarea { height: auto; min-height: 120px; padding: 8px 12px; line-height: 1.5; resize: vertical; }
 .checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); cursor: pointer; }
 .checkbox input { width: 16px; height: 16px; accent-color: var(--primary); }
 
@@ -158,6 +164,7 @@ svg { display: block; }
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   padding: 14px 10px 10px;
+  overflow-y: auto;
   z-index: 30;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
@@ -215,6 +222,8 @@ svg { display: block; }
 .search .input { padding-left: 34px; height: 36px; background: var(--bg); border-color: transparent; }
 .search .input:focus { background: #fff; border-color: var(--primary); }
 .list-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--text-3); }
+.select-all { display: flex; align-items: center; gap: 8px; min-width: 0; }
+label.select-all { cursor: pointer; }
 .select {
   height: 28px; padding: 0 26px 0 8px;
   border: 1px solid transparent; border-radius: 6px;
@@ -261,6 +270,9 @@ svg { display: block; }
   font-size: 11px; font-weight: 600; line-height: 1;
 }
 .badge.gray { background: #EEF0F3; color: var(--text-2); }
+.badge.violet { background: #F0EBFF; color: #6941C6; }
+.badge.green { background: #E3F5EC; color: var(--success); }
+.badge.amber { background: #FFF4DB; color: #8A5A00; }
 
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
@@ -327,6 +339,7 @@ svg { display: block; }
   margin-bottom: 20px;
   overflow: hidden;
 }
+.card-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
 .field {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px;
@@ -392,7 +405,8 @@ svg { display: block; }
 
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
-  display: grid; place-items: center;
+  /* minmax(0, 1fr): long unbreakable text in a dialog must not widen it past the screen. */
+  display: grid; grid-template-columns: minmax(0, 1fr); place-items: center;
   padding: 16px;
   background: rgba(17, 24, 39, .38);
   animation: fade .12s ease-out;
@@ -409,6 +423,7 @@ svg { display: block; }
 .modal-body { padding: 8px 20px 4px; color: var(--text-2); overflow-wrap: anywhere; }
 .modal-body p { margin: 0 0 12px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 20px; }
+.modal.wide { max-width: 560px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.98); } }
 
@@ -433,6 +448,72 @@ svg { display: block; }
 
 .nav-scrim { display: none; }
 
+/* ---------- Shared components (components.js) ---------- */
+
+.pick-list {
+  max-height: 300px; overflow-y: auto;
+  margin: 10px 0 4px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.pick-list .empty { padding: 28px 16px; }
+.pick-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text); cursor: pointer;
+}
+.pick-item:first-child { border-top: 0; }
+.pick-item:hover { background: var(--bg-hover); }
+.pick-item input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--primary); }
+.pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.pick-count { margin-right: auto; align-self: center; font-size: 13px; color: var(--text-2); }
+
+.batch-summary { color: var(--text); }
+.batch-warnings {
+  margin-bottom: 12px; padding: 10px 12px;
+  border: 1px solid #F5E1A8; border-radius: var(--radius);
+  background: #FFF8E6; color: #7A5300; font-size: 13px;
+}
+.batch-warnings-title { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; }
+.batch-warnings-title .icon { width: 16px; height: 16px; }
+.batch-warnings ul { max-height: 140px; overflow-y: auto; margin: 0; padding-left: 22px; }
+.batch-list {
+  list-style: none;
+  max-height: 260px; overflow-y: auto;
+  margin: 0 0 12px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.batch-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text); font-size: 13px;
+}
+.batch-row:first-child { border-top: 0; }
+.batch-row.muted { color: var(--text-3); }
+.batch-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.batch-message { white-space: pre-line; }
+.batch-message.error { color: var(--danger); }
+.batch-message:empty { display: none; }
+
+.event-text { color: var(--text); overflow-wrap: anywhere; }
+
+.selection-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--radius);
+  background: var(--primary-soft); color: var(--primary);
+  font-size: 13px; font-weight: 600;
+}
+.selection-bar[hidden] { display: none; }
+.list-header .selection-bar { margin-top: 10px; }
+.selection-count { white-space: nowrap; }
+/* Two rows that fit the narrow list pane: the count and the clear button,
+   then the actions on a row of their own. */
+.selection-bar > .icon-btn { order: 1; margin-left: auto; color: var(--primary); }
+.selection-actions { order: 2; flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.select-box { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--primary); cursor: pointer; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1100px) {
@@ -446,10 +527,10 @@ svg { display: block; }
     position: fixed; top: 0; bottom: 0; left: 0;
     width: 272px; max-width: 85vw;
     transform: translateX(-100%);
-    transition: transform .2s ease;
-    box-shadow: var(--shadow-lg);
+    transition: transform .2s ease, box-shadow .2s ease;
   }
-  .app.nav-open .sidebar { transform: none; }
+  /* The shadow only while open: off screen it would show at the left edge. */
+  .app.nav-open .sidebar { transform: none; box-shadow: var(--shadow-lg); }
   .app.nav-open .nav-scrim { display: block; position: fixed; inset: 0; z-index: 20; background: rgba(17, 24, 39, .3); }
   .topbar {
     display: flex; align-items: center; gap: 8px;

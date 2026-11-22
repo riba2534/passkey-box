@@ -10,27 +10,18 @@ type userView struct {
 	ID              int64   `json:"id"`
 	Username        string  `json:"username"`
 	IsAdmin         bool    `json:"is_admin"`
+	Disabled        bool    `json:"disabled"`
 	CreatedAt       string  `json:"created_at"`
 	CredentialCount int     `json:"credential_count"`
+	SharedInCount   int     `json:"shared_in_count"`
+	SharedOutCount  int     `json:"shared_out_count"`
 	LastUsedAt      *string `json:"last_used_at"`
 }
 
-type credentialView struct {
-	ID              string  `json:"id"`
-	RPID            string  `json:"rp_id"`
-	RPName          string  `json:"rp_name"`
-	UserHandle      string  `json:"user_handle"`
-	UserName        string  `json:"user_name"`
-	UserDisplayName string  `json:"user_display_name"`
-	Alg             int     `json:"alg"`
-	PrivateKey      string  `json:"private_key"`
-	PublicKey       string  `json:"public_key"`
-	SignCount       int64   `json:"sign_count"`
-	Label           string  `json:"label"`
-	Origin          string  `json:"origin"`
-	CreatedAt       string  `json:"created_at"`
-	LastUsedAt      *string `json:"last_used_at"`
-	UseCount        int64   `json:"use_count"`
+// adminUserView is the user as administrators see it, with their note.
+type adminUserView struct {
+	userView
+	Note string `json:"note"`
 }
 
 func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -48,44 +39,23 @@ func newUserView(u store.User) userView {
 		ID:              u.ID,
 		Username:        u.Username,
 		IsAdmin:         u.IsAdmin,
+		Disabled:        u.Disabled,
 		CreatedAt:       formatTime(u.CreatedAt),
 		CredentialCount: u.CredentialCount,
+		SharedInCount:   u.SharedInCount,
+		SharedOutCount:  u.SharedOutCount,
 		LastUsedAt:      formatTimePtr(u.LastUsedAt),
 	}
 }
 
-func newUserViews(users []store.User) []userView {
-	out := make([]userView, 0, len(users))
+func newAdminUserView(u store.User) adminUserView {
+	return adminUserView{userView: newUserView(u), Note: u.Note}
+}
+
+func newAdminUserViews(users []store.User) []adminUserView {
+	out := make([]adminUserView, 0, len(users))
 	for _, u := range users {
-		out = append(out, newUserView(u))
-	}
-	return out
-}
-
-func newCredentialView(c store.Credential) credentialView {
-	return credentialView{
-		ID:              c.ID,
-		RPID:            c.RPID,
-		RPName:          c.RPName,
-		UserHandle:      c.UserHandle,
-		UserName:        c.UserName,
-		UserDisplayName: c.UserDisplayName,
-		Alg:             c.Alg,
-		PrivateKey:      c.PrivateKey,
-		PublicKey:       c.PublicKey,
-		SignCount:       c.SignCount,
-		Label:           c.Label,
-		Origin:          c.Origin,
-		CreatedAt:       formatTime(c.CreatedAt),
-		LastUsedAt:      formatTimePtr(c.LastUsedAt),
-		UseCount:        c.UseCount,
-	}
-}
-
-func newCredentialViews(creds []store.Credential) []credentialView {
-	out := make([]credentialView, 0, len(creds))
-	for _, c := range creds {
-		out = append(out, newCredentialView(c))
+		out = append(out, newAdminUserView(u))
 	}
 	return out
 }

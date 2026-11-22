@@ -12,6 +12,12 @@ export type User = {
   last_used_at: string | null;
 };
 
+export type UserBrief = { id: number; username: string };
+/** JSON number = user ID, JSON string = username. */
+export type UserRef = number | string;
+
+export type Share = { user: UserBrief; shared_at: string; shared_by: UserBrief | null; last_used_at: string | null };
+
 export type Credential = {
   id: string;
   rp_id: string;
@@ -28,7 +34,29 @@ export type Credential = {
   created_at: string;
   last_used_at: string | null;
   use_count: number;
+  // Since 0.6.0.
+  owner?: UserBrief;
+  access?: 'owner' | 'shared';
+  shared_at?: string | null;
+  shared_with?: Share[];
 };
+
+export type CredentialBrief = { id: string; rp_id: string; user_name: string; owner: UserBrief };
+
+export type Batch<T> = { dry_run: boolean; results: T[] };
+export type ShareResult = { credential: CredentialBrief; user: UserBrief; status: string; warnings: string[] };
+export type TransferResult = {
+  credential: CredentialBrief;
+  from: UserBrief;
+  to: UserBrief;
+  status: string;
+  keep_access: boolean;
+  warnings: string[];
+};
+
+/** Transfers as the owner (`/credentials/*`) or as an administrator (`/admin/credentials/*`). */
+type Scope = 'owner' | 'admin';
+const credentialsPath = (scope: Scope) => (scope === 'admin' ? '/api/v1/admin/credentials' : '/api/v1/credentials');
 
 export class PkbApi {
   readonly baseUrl: string;
@@ -61,17 +89,41 @@ export class PkbApi {
     return (await this.request<{ user: User }>(admin, 'POST', '/api/v1/admin/users', body)).user;
   }
 
+  /** The caller's own credentials and the ones shared with them. */
   async listCredentials(account: Account, rpId?: string): Promise<Credential[]> {
     const query = rpId === undefined ? '' : `?rp_id=${encodeURIComponent(rpId)}`;
     return (await this.request<{ credentials: Credential[] }>(account, 'GET', `/api/v1/credentials${query}`)).credentials;
   }
 
-  async deleteCredential(account: Account, id: string): Promise<void> {
-    await this.request(account, 'DELETE', `/api/v1/credentials/${encodeURIComponent(id)}`);
+  async getCredential(account: Account, id: string): Promise<Credential> {
+    const path = `/api/v1/credentials/${encodeURIComponent(id)}`;
+    return (await this.request<{ credential: Credential }>(account, 'GET', path)).credential;
   }
 
-  async clearCredentials(account: Account): Promise<void> {
-    const credentials = await this.listCredentials(account);
-    await Promise.all(credentials.map((c) => this.deleteCredential(account, c.id)));
+  async share(account: Account, ids: string[], users: UserRef[]): Promise<Batch<ShareResult>> {
+    return this.request(account, 'POST', '/api/v1/credentials/share', { ids, users });
+  }
+
+  async unshare(account: Account, ids: string[], users: UserRef[]): Promise<Batch<ShareResult>> {
+    return this.request(account, 'POST', '/api/v1/credentials/unshare', { ids, users });
+  }
+
+  async transfer(
+    account: Account,
+    ids: string[],
+    to: UserRef,
+    options: { keepAccess?: boolean; scope?: Scope } = {},
+  ): Promise<Batch<TransferResult>> {
+    const body = { ids, to, keep_access: options.keepAccess ?? false };
+    return this.request(account, 'POST', `${credentialsPath(options.scope ?? 'owner')}/transfer`, body);
+  }
+
+  /** Deletes every credential on the server, whoever owns it, with their shares. */
+  async clearAllCredentials(admin: Account): Promise<void> {
+    for (;;) {
+      const { credentials } = await this.request<{ credentials: Credential[] }>(admin, 'GET', '/api/v1/admin/credentials?limit=500');
+      if (credentials.length === 0) return;
+      await this.request(admin, 'POST', '/api/v1/admin/credentials/batch-delete', { ids: credentials.map((c) => c.id) });
+    }
   }
 }

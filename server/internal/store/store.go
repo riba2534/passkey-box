@@ -26,11 +26,16 @@ var (
 	ErrConflict = errors.New("conflict")
 	// ErrBadPassword reports a password that does not match.
 	ErrBadPassword = errors.New("wrong password")
+	// ErrForbidden reports an operation the caller may not perform on a
+	// resource it can see, for example a share recipient deleting for everyone.
+	ErrForbidden = errors.New("forbidden")
 )
 
 // MaxUsernameLen is the maximum username length in characters after trimming.
 const MaxUsernameLen = 64
 
+// schema is the version 0 schema, which databases created before migrations
+// existed have. Never change it: later versions are added in migrate.go.
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
 	id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,36 +80,46 @@ CREATE INDEX IF NOT EXISTS credentials_user_rp ON credentials(user_id, rp_id_key
 
 // User is an account together with its credential statistics.
 type User struct {
-	ID              int64
-	Username        string
-	IsAdmin         bool
-	CreatedAt       time.Time
+	ID       int64
+	Username string
+	IsAdmin  bool
+	// Disabled users cannot sign in with any method.
+	Disabled bool
+	// Note is the administrators' note about the user.
+	Note      string
+	CreatedAt time.Time
+	// CredentialCount counts the credentials the user owns.
 	CredentialCount int
-	LastUsedAt      *time.Time
+	// SharedInCount counts credentials other users share with the user.
+	SharedInCount int
+	// SharedOutCount counts owned credentials shared with at least one user.
+	SharedOutCount int
+	// LastUsedAt is the latest use of an owned credential.
+	LastUsedAt *time.Time
 }
 
-// Credential is a stored passkey.
-type Credential struct {
-	ID              string
-	RPID            string
-	RPName          string
-	UserHandle      string
-	UserName        string
-	UserDisplayName string
-	Alg             int
-	PrivateKey      string
-	PublicKey       string
-	SignCount       int64
-	Label           string
-	Origin          string
-	CreatedAt       time.Time
-	LastUsedAt      *time.Time
-	UseCount        int64
+// UserBrief names a user: an owner, a share recipient or an audit party.
+type UserBrief struct {
+	ID       int64
+	Username string
+}
+
+// Brief returns the user's ID and name.
+func (u User) Brief() UserBrief { return UserBrief{ID: u.ID, Username: u.Username} }
+
+// UserKey refers to a user by ID or, when ID is 0, by username
+// (case-insensitive).
+type UserKey struct {
+	ID       int64
+	Username string
 }
 
 // Store is a SQLite-backed repository. It is safe for concurrent use.
 type Store struct {
 	db *sql.DB
+
+	// Migration is what Open did to the schema.
+	Migration Migration
 
 	// PasswordCost is the bcrypt cost used for new password hashes.
 	PasswordCost int
@@ -116,6 +131,18 @@ type Store struct {
 	// hash, so stale entries never match again.
 	mu       sync.Mutex
 	verified map[[32]byte]string
+
+	// reservedKey is the lookup key of the bootstrap administrator's name
+	// (EnsureAdmin). Start-up makes whoever holds that name an administrator,
+	// so nobody may rename to or from it, or register it.
+	reservedKey string
+}
+
+// ReservedUsername reports whether name is the bootstrap administrator's
+// (PKB_ADMIN_USERNAME), which self-registration must not take.
+func (s *Store) ReservedUsername(name string) bool {
+	_, key, ok := NormalizeUsername(name)
+	return ok && s.reservedKey != "" && key == s.reservedKey
 }
 
 const maxVerifiedEntries = 1024
@@ -140,11 +167,25 @@ func Open(path string) (*Store, error) {
 	// A single connection serialises all access, which keeps SQLite free of
 	// SQLITE_BUSY errors. The workload is tiny, so this costs nothing.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	ctx := context.Background()
+	var existed bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users')`).Scan(&existed); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialise schema: %w", err)
 	}
-	return &Store{db: db, PasswordCost: bcrypt.DefaultCost, verified: map[[32]byte]string{}}, nil
+	s := &Store{db: db, PasswordCost: bcrypt.DefaultCost, verified: map[[32]byte]string{}}
+	m, err := s.migrate(ctx, path, existed, time.Now())
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.Migration = m
+	return s, nil
 }
 
 // Close closes the database.
@@ -201,29 +242,14 @@ func (s *Store) passwordMatches(key, password, hash string) bool {
 	return true
 }
 
-const userColumns = `u.id, u.username, u.is_admin, u.created_at,
+const userColumns = `u.id, u.username, u.is_admin, u.disabled, u.note, u.created_at,
 	(SELECT COUNT(*) FROM credentials c WHERE c.user_id = u.id),
+	(SELECT COUNT(*) FROM credential_shares s WHERE s.user_id = u.id),
+	(SELECT COUNT(*) FROM credentials c WHERE c.user_id = u.id
+		AND EXISTS (SELECT 1 FROM credential_shares s WHERE s.credential_seq = c.seq)),
 	(SELECT MAX(c.last_used_at) FROM credentials c WHERE c.user_id = u.id)`
 
 type rowScanner interface{ Scan(dest ...any) error }
-
-// queryAll runs query and scans every row with scan.
-func queryAll[T any](ctx context.Context, db *sql.DB, scan func(rowScanner) (T, error), query string, args ...any) ([]T, error) {
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []T{}
-	for rows.Next() {
-		v, err := scan(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
-}
 
 // scanUser scans userColumns. Columns selected before them are scanned into
 // leading, in order.
@@ -233,7 +259,8 @@ func scanUser(r rowScanner, leading ...any) (User, error) {
 		created  int64
 		lastUsed sql.NullInt64
 	)
-	dest := append(leading, &u.ID, &u.Username, &u.IsAdmin, &created, &u.CredentialCount, &lastUsed)
+	dest := append(leading, &u.ID, &u.Username, &u.IsAdmin, &u.Disabled, &u.Note, &created,
+		&u.CredentialCount, &u.SharedInCount, &u.SharedOutCount, &lastUsed)
 	if err := r.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -245,59 +272,51 @@ func scanUser(r rowScanner, leading ...any) (User, error) {
 	return u, nil
 }
 
-// CreateUser creates an account. The username must already be valid
-// (see NormalizeUsername); duplicates (case-insensitive) return ErrConflict.
+// CreateUser creates an account as the system; see CreateUserAs.
 func (s *Store) CreateUser(ctx context.Context, username, password string, isAdmin bool, now time.Time) (User, error) {
-	display, key, ok := NormalizeUsername(username)
-	if !ok {
-		return User{}, fmt.Errorf("invalid username %q", username)
-	}
-	hash, err := s.hash(password)
-	if err != nil {
-		return User{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username_key = ?`, key).Scan(&exists)
-	if err == nil {
-		return User{}, ErrConflict
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return User{}, err
-	}
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO users (username, username_key, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`,
-		display, key, hash, isAdmin, toMillis(now))
-	if err != nil {
-		return User{}, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return User{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-	return s.GetUser(ctx, id)
+	return s.CreateUserAs(ctx, SystemActor, NewUser{Username: username, Password: password, IsAdmin: isAdmin}, now)
 }
 
 // GetUser returns the user with the given ID.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.id = ?`, id))
+	return resolveUser(ctx, s.db, UserKey{ID: id})
 }
 
-// ListUsers returns all users ordered by ID.
-func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	return queryAll(ctx, s.db, func(r rowScanner) (User, error) { return scanUser(r) },
+// UserFilter selects users for ListUsers. Zero fields do not filter.
+type UserFilter struct {
+	// Query matches a substring of the username or the note, ignoring case.
+	Query    string
+	Admin    *bool
+	Disabled *bool
+}
+
+func (f UserFilter) matches(u User) bool {
+	q := strings.ToLower(f.Query)
+	return (f.Admin == nil || *f.Admin == u.IsAdmin) &&
+		(f.Disabled == nil || *f.Disabled == u.Disabled) &&
+		(q == "" || strings.Contains(strings.ToLower(u.Username), q) || strings.Contains(strings.ToLower(u.Note), q))
+}
+
+// ListUsers returns the users matching f, ordered by ID. The query is matched
+// in Go because SQLite only folds the case of ASCII letters.
+func (s *Store) ListUsers(ctx context.Context, f UserFilter) ([]User, error) {
+	users, err := queryRows(ctx, s.db, func(r rowScanner) (User, error) { return scanUser(r) },
 		`SELECT `+userColumns+` FROM users u ORDER BY u.id`)
+	if err != nil {
+		return nil, err
+	}
+	out := users[:0]
+	for _, u := range users {
+		if f.matches(u) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
 
 // Authenticate checks a username (case-insensitive) and password. It returns
-// ErrBadPassword for an unknown user or a wrong password.
+// ErrBadPassword for an unknown user or a wrong password. Disabled users are
+// returned like any other; callers reject them.
 func (s *Store) Authenticate(ctx context.Context, username, password string) (User, error) {
 	_, key, ok := NormalizeUsername(username)
 	if !ok {
@@ -334,39 +353,29 @@ func (s *Store) CheckPassword(ctx context.Context, id int64, password string) er
 	return nil
 }
 
-// SetPassword replaces the user's password. Existing sessions stay valid.
-func (s *Store) SetPassword(ctx context.Context, id int64, password string) error {
-	hash, err := s.hash(password)
-	if err != nil {
-		return err
-	}
-	return s.execOne(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, id)
+// SetDisabled disables or re-enables the user's sign-in as the system; see
+// UpdateUser.
+func (s *Store) SetDisabled(ctx context.Context, id int64, disabled bool) error {
+	_, err := s.UpdateUser(ctx, SystemActor, id, UserUpdate{Disabled: &disabled}, time.Now())
+	return err
 }
 
-// SetAdmin grants or revokes administrator rights.
-func (s *Store) SetAdmin(ctx context.Context, id int64, isAdmin bool) error {
-	return s.execOne(ctx, `UPDATE users SET is_admin = ? WHERE id = ?`, isAdmin, id)
-}
-
-// DeleteUser removes the user together with its sessions and credentials.
-func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	return s.execOne(ctx, `DELETE FROM users WHERE id = ?`, id)
-}
-
-// EnsureAdmin makes sure the named user exists and is an administrator. A new
-// user gets the given password; an existing user keeps its password.
+// EnsureAdmin makes sure the named user exists and is an administrator, acting
+// as the system. A new user gets the given password; an existing user keeps
+// its password.
 func (s *Store) EnsureAdmin(ctx context.Context, username, password string, now time.Time) (created bool, err error) {
 	_, key, ok := NormalizeUsername(username)
 	if !ok {
 		return false, fmt.Errorf("invalid admin username %q", username)
 	}
-	var id int64
-	err = s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username_key = ?`, key).Scan(&id)
+	s.reservedKey = key
+	user, err := resolveUser(ctx, s.db, UserKey{Username: username})
 	switch {
 	case err == nil:
-		return false, s.SetAdmin(ctx, id, true)
-	case errors.Is(err, sql.ErrNoRows):
-		_, err = s.CreateUser(ctx, username, password, true, now)
+		_, err = s.UpdateUser(ctx, SystemActor, user.ID, UserUpdate{IsAdmin: new(true)}, now)
+		return false, err
+	case errors.Is(err, ErrNotFound):
+		_, err = s.CreateUserAs(ctx, SystemActor, NewUser{Username: username, Password: password, IsAdmin: true}, now)
 		return err == nil, err
 	default:
 		return false, err
@@ -401,121 +410,4 @@ func (s *Store) SessionUser(ctx context.Context, token string, now time.Time) (U
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
 	return err
-}
-
-const credentialColumns = `id, rp_id, rp_name, user_handle, user_name, user_display_name, alg,
-	private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count`
-
-func scanCredential(r rowScanner) (Credential, error) {
-	var (
-		c        Credential
-		created  int64
-		lastUsed sql.NullInt64
-	)
-	err := r.Scan(&c.ID, &c.RPID, &c.RPName, &c.UserHandle, &c.UserName, &c.UserDisplayName, &c.Alg,
-		&c.PrivateKey, &c.PublicKey, &c.SignCount, &c.Label, &c.Origin, &created, &lastUsed, &c.UseCount)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Credential{}, ErrNotFound
-		}
-		return Credential{}, err
-	}
-	c.CreatedAt = fromMillis(created)
-	c.LastUsedAt = fromNullMillis(lastUsed)
-	return c, nil
-}
-
-// ListCredentials returns the user's credentials, newest first. A non-empty
-// rpID keeps only credentials whose rp_id equals it case-insensitively.
-func (s *Store) ListCredentials(ctx context.Context, userID int64, rpID string) ([]Credential, error) {
-	query := `SELECT ` + credentialColumns + ` FROM credentials WHERE user_id = ?`
-	args := []any{userID}
-	if rpID != "" {
-		query += ` AND rp_id_key = ?`
-		args = append(args, strings.ToLower(rpID))
-	}
-	query += ` ORDER BY created_at DESC, seq DESC`
-	return queryAll(ctx, s.db, scanCredential, query, args...)
-}
-
-// GetCredential returns one of the user's credentials.
-func (s *Store) GetCredential(ctx context.Context, userID int64, id string) (Credential, error) {
-	return scanCredential(s.db.QueryRowContext(ctx,
-		`SELECT `+credentialColumns+` FROM credentials WHERE user_id = ? AND id = ?`, userID, id))
-}
-
-// SaveCredential stores a new credential for the user. Existing credentials
-// with the same rp_id (case-insensitive) and user_handle are replaced, the way
-// an authenticator overwrites a discoverable credential for the same account.
-// If the ID is still taken by another credential, nothing changes and
-// ErrConflict is returned. Statistics on c are ignored.
-func (s *Store) SaveCredential(ctx context.Context, userID int64, c Credential, now time.Time) (Credential, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Credential{}, err
-	}
-	defer tx.Rollback()
-	rpKey := strings.ToLower(c.RPID)
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM credentials WHERE user_id = ? AND rp_id_key = ? AND user_handle = ?`,
-		userID, rpKey, c.UserHandle); err != nil {
-		return Credential{}, err
-	}
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE user_id = ? AND id = ?`, userID, c.ID).Scan(&exists)
-	if err == nil {
-		return Credential{}, ErrConflict
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return Credential{}, err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO credentials
-		(user_id, id, rp_id, rp_id_key, rp_name, user_handle, user_name, user_display_name, alg,
-		 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
-		userID, c.ID, c.RPID, rpKey, c.RPName, c.UserHandle, c.UserName, c.UserDisplayName, c.Alg,
-		c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now))
-	if err != nil {
-		return Credential{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Credential{}, err
-	}
-	return s.GetCredential(ctx, userID, c.ID)
-}
-
-// SetCredentialLabel changes the user-visible note of a credential.
-func (s *Store) SetCredentialLabel(ctx context.Context, userID int64, id, label string) (Credential, error) {
-	if err := s.execOne(ctx, `UPDATE credentials SET label = ? WHERE user_id = ? AND id = ?`, label, userID, id); err != nil {
-		return Credential{}, err
-	}
-	return s.GetCredential(ctx, userID, id)
-}
-
-// MarkCredentialUsed increments the use counter and records the time.
-func (s *Store) MarkCredentialUsed(ctx context.Context, userID int64, id string, now time.Time) error {
-	return s.execOne(ctx,
-		`UPDATE credentials SET use_count = use_count + 1, last_used_at = ? WHERE user_id = ? AND id = ?`,
-		toMillis(now), userID, id)
-}
-
-// DeleteCredential removes one of the user's credentials.
-func (s *Store) DeleteCredential(ctx context.Context, userID int64, id string) error {
-	return s.execOne(ctx, `DELETE FROM credentials WHERE user_id = ? AND id = ?`, userID, id)
-}
-
-// execOne runs a statement that must affect at least one row.
-func (s *Store) execOne(ctx context.Context, query string, args ...any) error {
-	res, err := s.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }

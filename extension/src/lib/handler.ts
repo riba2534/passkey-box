@@ -1,10 +1,10 @@
 // Background request handling: decides what to do with a page's create/get call.
 
-import { describeError, type Credential, type NewCredential } from "./api";
+import { describeError, sharedBy, type Credential, type NewCredential } from "./api";
 import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlgorithm } from "./authenticator";
 import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
-import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "./decision";
+import { autoLoginPolicy, decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm } from "./decision";
 import type { ManagedPolicy } from "./managed";
 import type { OwnedCredentials } from "./owned";
 import { requestedRpId, type BackgroundRequest, type BackgroundResponse, type CandidateSummary } from "./protocol";
@@ -40,7 +40,16 @@ const MSG_ALG = "None of the requested public key algorithms are supported. Pass
 const ABORTED = { action: "reject", name: "NotAllowedError", message: "请求已取消。" } as const;
 
 function summarize(c: Credential, owned: OwnedCredentials): CandidateSummary {
-  return { id: c.id, user_name: c.user_name, user_display_name: c.user_display_name, rp_id: c.rp_id, owned: owned.has(c.id) };
+  const summary: CandidateSummary = {
+    id: c.id,
+    user_name: c.user_name,
+    user_display_name: c.user_display_name,
+    rp_id: c.rp_id,
+    owned: owned.has(c.id),
+  };
+  const by = sharedBy(c);
+  if (by !== undefined) summary.shared_by = by;
+  return summary;
 }
 
 export async function handleRequest(req: BackgroundRequest, deps: HandlerDeps): Promise<BackgroundResponse> {
@@ -80,12 +89,13 @@ async function handleGet(
   } else {
     // Accounts this browser profile registered or used come first; a single one of them signs in
     // like the only candidate, and under the owned-only policy only such an account signs in by
-    // itself. Without the record, no account counts as one of them.
+    // itself. That policy also applies while a passkey another user shared is a candidate. Without
+    // the record, no account counts as one of them.
     const owned = await deps.owned.load().catch(() => new Map<string, number>());
     const ranked = rankOwnedFirst(candidates, owned);
     const ownedCount = ranked.filter((c) => owned.has(c.id)).length;
     const [settings, policy] = await Promise.all([deps.loadSettings(), deps.loadPolicy()]);
-    const decision = decideGet(candidates.length, req.mediation, settings, ownedCount, policy.autoLogin);
+    const decision = decideGet(candidates.length, req.mediation, settings, ownedCount, autoLoginPolicy(candidates, policy.autoLogin));
     if (decision === "pending") return { action: "pending" };
     if (decision === "empty") return { action: "empty" };
     if (decision === "picker") return { action: "picker", candidates: ranked.map((c) => summarize(c, owned)) };

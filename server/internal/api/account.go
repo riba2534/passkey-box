@@ -30,19 +30,12 @@ func validPassword(w http.ResponseWriter, password string) bool {
 	return true
 }
 
-// createUser validates the account fields and creates the user. It writes the
-// error response and returns false on failure.
-func (s *Server) createUser(w http.ResponseWriter, r *http.Request, username, password string, isAdmin bool) (store.User, bool) {
-	if !validUsername(w, username) || !validPassword(w, password) {
-		return store.User{}, false
-	}
-	user, err := s.opts.Store.CreateUser(r.Context(), username, password, isAdmin, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "username already exists")
-		return store.User{}, false
-	}
+// createUser creates the account on behalf of actor. It writes the error
+// response and returns false on failure.
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request, actor store.Actor, u store.NewUser) (store.User, bool) {
+	user, err := s.opts.Store.CreateUserAs(r.Context(), actor, u, s.opts.Now())
 	if err != nil {
-		s.internalError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return store.User{}, false
 	}
 	return user, true
@@ -63,6 +56,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.internalError(w, err)
+		return
+	}
+	if user.Disabled {
+		accountDisabled(w)
 		return
 	}
 	if err := s.startSession(w, r, user); err != nil {
@@ -92,7 +89,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	user, ok := s.createUser(w, r, req.Username, req.Password, false)
+	// Start-up makes the holder of the bootstrap administrator's name an
+	// administrator, so nobody may register it while it is free.
+	if s.opts.Store.ReservedUsername(req.Username) {
+		writeError(w, http.StatusConflict, "conflict", "username already exists")
+		return
+	}
+	// Nobody is signed in yet, so the account is created by the system.
+	user, ok := s.createUser(w, r, store.SystemActor, store.NewUser{Username: req.Username, Password: req.Password})
 	if !ok {
 		return
 	}
@@ -103,11 +107,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"user": newUserView(user)})
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, user store.User) {
-	writeJSON(w, http.StatusOK, map[string]any{"user": newUserView(user)})
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, c *caller) {
+	auth := map[string]any{"method": c.Method, "read_only": c.readOnly(), "token": nil}
+	if c.Token != nil {
+		auth["token"] = newTokenView(*c.Token)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": newUserView(c.User), "auth": auth})
 }
 
-func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, c *caller) {
+	user := c.User
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
@@ -127,9 +136,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, us
 		s.internalError(w, err)
 		return
 	}
-	if err := s.opts.Store.SetPassword(r.Context(), user.ID, req.NewPassword); err != nil {
-		s.internalError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	_, err = s.opts.Store.UpdateUser(r.Context(), c.actor(), user.ID, store.UserUpdate{Password: &req.NewPassword}, s.opts.Now())
+	s.writeNoContent(w, err, userNotFound)
 }

@@ -1,6 +1,6 @@
 // Fixtures for specs that drive the real Passkey Box extension against the real server.
 // Each test gets a fresh persistent Chromium profile with the unpacked extension loaded,
-// a reset test RP and empty credential lists for both test accounts.
+// a reset test RP and a server without any credentials.
 
 import { type BrowserContext, chromium, expect, type Locator, type Page, test as base, type Worker } from '@playwright/test';
 import { CHROMIUM_EXECUTABLE_PATH } from './config.ts';
@@ -74,7 +74,7 @@ export class PkbUi {
 
 // The headless shell cannot load extensions; the "chromium" channel runs full Chromium headless.
 /** A fresh browser profile (temporary user data dir) with the unpacked extension loaded. */
-export function launchProfile(stack: StackState, headless: boolean): Promise<BrowserContext> {
+function launchProfile(stack: StackState, headless: boolean): Promise<BrowserContext> {
   return chromium.launchPersistentContext('', {
     channel: 'chromium',
     executablePath: CHROMIUM_EXECUTABLE_PATH,
@@ -89,6 +89,40 @@ export async function extensionIn(context: BrowserContext, stack: StackState): P
     context.serviceWorkers().find(isExtensionWorker) ??
     (await context.waitForEvent('serviceworker', { predicate: isExtensionWorker }));
   return new PkbExtension(worker, stack.serverUrl);
+}
+
+export type Profile = { context: BrowserContext; extension: PkbExtension; rp: RpPage; ui: PkbUi };
+
+/** Another browser profile, its extension signed in to `account`, on the test RP. */
+export async function openProfile(
+  stack: StackState,
+  account: Account,
+  headless: boolean,
+  settings: Partial<PkbSettings> = {},
+): Promise<Profile> {
+  const context = await launchProfile(stack, headless);
+  const extension = await extensionIn(context, stack);
+  await extension.configure(account, settings);
+  const page = context.pages()[0] ?? (await context.newPage());
+  const rp = new RpPage(page);
+  await rp.goto();
+  return { context, extension, rp, ui: new PkbUi(page) };
+}
+
+/** Runs `use` in another browser profile signed in as `account` (see openProfile), then closes it. */
+export async function inProfile(
+  stack: StackState,
+  account: Account,
+  headless: boolean,
+  use: (profile: Profile) => Promise<void>,
+  settings: Partial<PkbSettings> = {},
+): Promise<void> {
+  const profile = await openProfile(stack, account, headless, settings);
+  try {
+    await use(profile);
+  } finally {
+    await profile.context.close();
+  }
 }
 
 type Fixtures = {
@@ -113,7 +147,8 @@ export const test = base.extend<Fixtures>({
 
   cleanState: [
     async ({ stack, pkb }, use) => {
-      await Promise.all([rpApi.reset(), pkb.clearCredentials(stack.users.a), pkb.clearCredentials(stack.users.b)]);
+      // Shares and transfers move credentials between accounts, so clear the whole server as administrator.
+      await Promise.all([rpApi.reset(), pkb.clearAllCredentials(stack.admin)]);
       await use();
     },
     { auto: true },

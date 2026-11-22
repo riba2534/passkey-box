@@ -64,8 +64,33 @@ describe("picker dialog", () => {
     const choice = ui.showPicker("r1", "example.com", [{ ...candidates[0]!, owned: true }, { ...candidates[1]!, owned: false }]);
     expect(q(ui, '[data-pkb-credential-id="cred-a"] .tag')!.textContent).toBe("本浏览器用过");
     expect(q(ui, '[data-pkb-credential-id="cred-b"] .tag')).toBeNull();
+    expect(q(ui, '[data-pkb-credential-id="cred-b"] .tags')).toBeNull();
     q(ui, '[data-pkb-credential-id="cred-a"] .tag')!.click();
     expect(await choice).toEqual({ kind: "select", credentialId: "cred-a" });
+  });
+
+  it("marks passkeys shared by other users with their owner", async () => {
+    const ui = createPageUI(document);
+    const choice = ui.showPicker("r1", "example.com", [
+      { ...candidates[0]!, owned: true, shared_by: "carol" },
+      { ...candidates[1]!, shared_by: "dave" },
+    ]);
+    const tags = (id: string) => [...ui.root()!.querySelectorAll(`[data-pkb-credential-id="${id}"] .tag`)].map((t) => t.textContent);
+    expect(tags("cred-a")).toEqual(["本浏览器用过", "共享自 carol"]);
+    expect(q(ui, '[data-pkb-credential-id="cred-a"] .tags')!.children).toHaveLength(2);
+    expect(tags("cred-b")).toEqual(["共享自 dave"]);
+    // A long owner name is cut short; the tooltip keeps all of it.
+    expect(q(ui, '[data-pkb-credential-id="cred-b"] .tag')!.title).toBe("共享自 dave");
+    q(ui, '[data-pkb-credential-id="cred-b"] .tag')!.click();
+    expect(await choice).toEqual({ kind: "select", credentialId: "cred-b" });
+  });
+
+  it("stacks both tags and truncates them instead of overflowing a narrow card", () => {
+    const ui = createPageUI(document);
+    void ui.showPicker("r1", "example.com", candidates);
+    const css = ui.root()!.querySelector("style")!.textContent!;
+    expect(css).toMatch(/\.tags \{[^}]*min-width: 0;[^}]*max-width: 45%;[^}]*flex-direction: column;/);
+    expect(css).toMatch(/\.tag \{[^}]*max-width: 100%;[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
   });
 
   it("clicking an account resolves the selection and removes the dialog", async () => {
@@ -129,10 +154,11 @@ describe("empty and error dialogs", () => {
 
   it("does not interpret page data as HTML", () => {
     const ui = createPageUI(document);
-    void ui.showPicker("r1", "<img src=x>", [{ id: "x", user_name: "<b>bold</b>", user_display_name: "", rp_id: "x" }]);
-    // The only image is our own logo; nothing from the page may become markup.
-    expect(ui.root()!.querySelector("img:not(.logo), b")).toBeNull();
+    void ui.showPicker("r1", "<img src=x>", [{ id: "x", user_name: "<b>bold</b>", user_display_name: "", rp_id: "x", shared_by: "<i>eve</i>" }]);
+    // The only image is our own logo; nothing from the page or the server may become markup.
+    expect(ui.root()!.querySelector("img:not(.logo), b, i")).toBeNull();
     expect(q(ui, "[data-pkb-credential-id]")!.textContent).toContain("<b>bold</b>");
+    expect(q(ui, "[data-pkb-credential-id] .tag")!.textContent).toBe("共享自 <i>eve</i>");
   });
 });
 

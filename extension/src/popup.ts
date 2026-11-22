@@ -4,7 +4,17 @@ import { describeError, ServerClient, type Credential } from "./lib/api";
 import { CONFIG_KEY, type Config, type Settings } from "./lib/config";
 import { verifyLogin } from "./lib/login";
 import { MANAGED_KEY, type ManagedPolicy } from "./lib/managed";
-import { credentialTitle, formatTime, groupCredentials, serverHost, siteUrl, tabHostname } from "./lib/popup-model";
+import {
+  accountName,
+  credentialTitle,
+  detailFields,
+  groupCredentials,
+  removeAction,
+  serverHost,
+  sharedLabel,
+  siteUrl,
+  tabHostname,
+} from "./lib/popup-model";
 import { clearConfig, loadConfig, loadPolicy, loadSettings, saveConfig, saveSettings } from "./lib/storage";
 import { avatar } from "./ui/avatar";
 import { button, h, icon } from "./ui/dom";
@@ -128,6 +138,16 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
 
   function row(c: Credential): HTMLElement {
     const title = credentialTitle(c);
+    const shared = sharedLabel(c);
+    const sub = shared
+      ? h(
+          document,
+          "span",
+          { class: "item-sub shared" },
+          h(document, "span", { class: "item-account" }, accountName(c)),
+          h(document, "span", { class: "item-owner", title: shared }, shared),
+        )
+      : h(document, "span", { class: "item-sub" }, accountName(c));
     const btn = h(
       document,
       "button",
@@ -138,7 +158,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
         "span",
         { class: "item-text" },
         h(document, "span", { class: "item-title" }, title),
-        h(document, "span", { class: "item-sub" }, c.user_name || c.user_display_name || "（无用户名）"),
+        sub,
       ),
       icon(document, CHEVRON, "item-go"),
     );
@@ -199,23 +219,17 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
     topbar.hidden = true;
     const title = credentialTitle(c);
     const status = h(document, "p", { class: "state-error", role: "alert", hidden: "" });
-    const fields: Array<[string, string]> = [
-      ["网站", c.rp_id],
-      ["用户名", c.user_name || "—"],
-      ["显示名", c.user_display_name || "—"],
-      ["创建时间", formatTime(c.created_at, "—")],
-      ["最近使用", formatTime(c.last_used_at)],
-    ];
-    const del = button(document, "删除", "danger", () => {
+    const remove = removeAction(c);
+    const del = button(document, remove.label, "danger", () => {
       void (async () => {
         del.disabled = true;
         try {
           await client.deleteCredential(c.id);
           if (state.credentials) state.credentials = state.credentials.filter((x) => x.id !== c.id);
-          flash("已删除通行密钥");
+          flash(remove.done);
           showList();
         } catch (err) {
-          status.textContent = `删除失败：${describeError(err)}`;
+          status.textContent = `${remove.failed}：${describeError(err)}`;
           status.hidden = false;
           del.disabled = false;
         }
@@ -234,7 +248,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
         document,
         "dl",
         { class: "fields" },
-        ...fields.map(([k, v]) => h(document, "div", { class: "field-row" }, h(document, "dt", {}, k), h(document, "dd", {}, v))),
+        ...detailFields(c).map(([k, v]) => h(document, "div", { class: "field-row" }, h(document, "dt", {}, k), h(document, "dd", {}, v))),
       ),
       h(
         document,
@@ -246,7 +260,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
             () => flash("复制失败"),
           );
         }),
-        button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })),
+        siteUrl(c) ? button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })) : null,
         del,
       ),
       status,

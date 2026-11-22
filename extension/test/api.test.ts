@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, basicAuthHeader, describeError, ServerClient } from "../src/lib/api";
+import { ApiError, basicAuthHeader, describeError, ServerClient, sharedBy } from "../src/lib/api";
 import { fakeFetch, json } from "./fixtures";
 
 const config = { serverUrl: "http://127.0.0.1:18411", username: "alice", password: "secret" };
@@ -93,5 +93,35 @@ describe("ServerClient", () => {
     expect(describeError(await new ServerClient(config, boom.fn).me().catch((e: unknown) => e))).toBe(
       "服务器返回错误（500）：db locked",
     );
+  });
+
+  it("explains a disabled account; other 403s stay generic", async () => {
+    const disabled = fakeFetch(() => json(403, { error: { code: "account_disabled", message: "account is disabled" } }));
+    expect(describeError(await new ServerClient(config, disabled.fn).listCredentials().catch((e: unknown) => e))).toBe(
+      "账户已被停用，请联系管理员",
+    );
+    const forbidden = fakeFetch(() => json(403, { error: { code: "forbidden", message: "not the owner" } }));
+    expect(describeError(await new ServerClient(config, forbidden.fn).me().catch((e: unknown) => e))).toBe(
+      "服务器返回错误（403）：not the owner",
+    );
+  });
+});
+
+describe("credentials shared by other users", () => {
+  const base = { id: "c", rp_id: "github.com", user_name: "alice@example.com" };
+
+  it("passes the 0.6.0 fields through", async () => {
+    const shared = { ...base, owner: { id: 2, username: "bob" }, access: "shared", shared_at: "2026-11-20T00:00:00Z" };
+    const { fn } = fakeFetch(() => json(200, { credentials: [shared] }));
+    const [c] = await new ServerClient(config, fn).listCredentials();
+    expect(c).toEqual(shared);
+    expect(sharedBy(c!)).toBe("bob");
+  });
+
+  it("names the owner only for credentials shared with the caller", () => {
+    expect(sharedBy({ owner: { id: 1, username: "alice" }, access: "owner" })).toBeUndefined();
+    expect(sharedBy({ access: "shared" })).toBeUndefined();
+    // Servers before 0.6.0 send neither field.
+    expect(sharedBy({})).toBeUndefined();
   });
 });

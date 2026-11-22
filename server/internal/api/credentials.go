@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,21 +64,46 @@ func (c *credentialRequest) validate() string {
 	return ""
 }
 
-func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request, user store.User) {
-	s.writeCredentials(w, r, user.ID)
+// credentialAccess parses the access query parameter: all (the default),
+// owned or shared. It answers 400 and returns false for other values.
+func credentialAccess(w http.ResponseWriter, r *http.Request) (string, bool) {
+	switch r.URL.Query().Get("access") {
+	case "", "all":
+		return "", true
+	case "owned":
+		return store.AccessOwner, true
+	case "shared":
+		return store.AccessShared, true
+	default:
+		badRequest(w, "access must be all, owned or shared")
+		return "", false
+	}
 }
 
-func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID int64) {
-	rpID := strings.TrimSpace(r.URL.Query().Get("rp_id"))
-	creds, err := s.opts.Store.ListCredentials(r.Context(), userID, rpID)
+func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request, c *caller) {
+	s.writeCredentials(w, r, c.User.ID, c.privateKeys(), false)
+}
+
+// writeCredentials answers the credentials the user owns or that are shared
+// with them, filtered by the rp_id and access query parameters. Shares are
+// listed for the owner and, with admin, for every credential.
+func (s *Server) writeCredentials(w http.ResponseWriter, r *http.Request, userID int64, privateKeys, admin bool) {
+	access, ok := credentialAccess(w, r)
+	if !ok {
+		return
+	}
+	creds, err := s.opts.Store.ListAccessibleCredentials(r.Context(), userID, store.AccessFilter{
+		RPID:   strings.TrimSpace(r.URL.Query().Get("rp_id")),
+		Access: access,
+	})
 	if err != nil {
 		s.internalError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"credentials": newCredentialViews(creds)})
+	writeJSON(w, http.StatusOK, map[string]any{"credentials": newAccessCredentialViews(creds, privateKeys, admin)})
 }
 
-func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
 	var req credentialRequest
 	if !readJSON(w, r, &req) {
 		return
@@ -88,7 +112,7 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, msg)
 		return
 	}
-	cred, err := s.opts.Store.SaveCredential(r.Context(), user.ID, store.Credential{
+	cred, err := s.opts.Store.SaveCredential(r.Context(), c.actor(), c.User.ID, store.Credential{
 		ID:              req.ID,
 		RPID:            req.RPID,
 		RPName:          req.RPName,
@@ -102,62 +126,61 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, 
 		Label:           req.Label,
 		Origin:          req.Origin,
 	}, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "credential id already exists")
-		return
-	}
 	if err != nil {
-		s.internalError(w, err)
+		s.writeStoreError(w, err, credentialNotFound)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"credential": newCredentialView(cred)})
+	writeJSON(w, http.StatusCreated, map[string]any{"credential": newAccessCredentialView(cred, c.privateKeys(), false)})
 }
 
-func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, user store.User) {
+func (s *Server) handleGetCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	cred, err := s.opts.Store.GetCredential(r.Context(), c.User.ID, r.PathValue("id"))
+	if err != nil {
+		s.writeStoreError(w, err, credentialNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"credential": newAccessCredentialView(cred, c.privateKeys(), false)})
+}
+
+// readLabel reads a {"label": "…"} request body. On failure it answers 400
+// and returns false.
+func readLabel(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req struct {
 		Label *string `json:"label"`
 	}
 	if !readJSON(w, r, &req) {
-		return
+		return "", false
 	}
 	if req.Label == nil {
 		badRequest(w, "label is required")
-		return
+		return "", false
 	}
-	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), user.ID, r.PathValue("id"), *req.Label)
-	if errors.Is(err, store.ErrNotFound) {
-		credentialNotFound(w)
-		return
-	}
-	if err != nil {
-		s.internalError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"credential": newCredentialView(cred)})
+	return *req.Label, true
 }
 
-func (s *Server) handleUseCredential(w http.ResponseWriter, r *http.Request, user store.User) {
-	err := s.opts.Store.MarkCredentialUsed(r.Context(), user.ID, r.PathValue("id"), s.opts.Now())
+func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	label, ok := readLabel(w, r)
+	if !ok {
+		return
+	}
+	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), c.actor(), c.User.ID, r.PathValue("id"), label, s.opts.Now())
+	if err != nil {
+		s.writeStoreError(w, err, credentialNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"credential": newAccessCredentialView(cred, c.privateKeys(), false)})
+}
+
+func (s *Server) handleUseCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	err := s.opts.Store.MarkCredentialUsed(r.Context(), c.User.ID, r.PathValue("id"), s.opts.Now())
 	s.writeNoContent(w, err, credentialNotFound)
 }
 
-func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, user store.User) {
-	err := s.opts.Store.DeleteCredential(r.Context(), user.ID, r.PathValue("id"))
+func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, c *caller) {
+	err := s.opts.Store.DeleteCredential(r.Context(), c.actor(), c.User.ID, r.PathValue("id"), s.opts.Now())
 	s.writeNoContent(w, err, credentialNotFound)
 }
 
 func credentialNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "credential not found")
-}
-
-// writeNoContent answers 204 on success, notFound on store.ErrNotFound and 500 otherwise.
-func (s *Server) writeNoContent(w http.ResponseWriter, err error, notFound func(http.ResponseWriter)) {
-	switch {
-	case err == nil:
-		w.WriteHeader(http.StatusNoContent)
-	case errors.Is(err, store.ErrNotFound):
-		notFound(w)
-	default:
-		s.internalError(w, err)
-	}
 }

@@ -1,20 +1,4 @@
-import type { BrowserContext } from '@playwright/test';
-import type { Account } from '../../support/pkb-api.ts';
-import { expect, extensionIn, launchProfile, PkbUi, test } from '../../support/extension-fixtures.ts';
-import { RpPage } from '../../support/rp.ts';
-import type { StackState } from '../../support/stack.ts';
-
-type Profile = { context: BrowserContext; rp: RpPage; ui: PkbUi };
-
-/** Another browser profile signed in to the same Passkey Box account, on the test RP. */
-async function openProfile(stack: StackState, account: Account, headless: boolean): Promise<Profile> {
-  const context = await launchProfile(stack, headless);
-  await (await extensionIn(context, stack)).configure(account);
-  const page = context.pages()[0] ?? (await context.newPage());
-  const rp = new RpPage(page);
-  await rp.goto();
-  return { context, rp, ui: new PkbUi(page) };
-}
+import { expect, inProfile, test } from '../../support/extension-fixtures.ts';
 
 // Browser profiles that share one Passkey Box account (as in AnyBrowser) each sign in with the
 // account they registered, without choosing; a profile that used none of them still asks.
@@ -23,8 +7,7 @@ test('each browser profile signs in with the passkey it registered', async ({ ex
   await rp.goto();
   await rp.registerOk('alice');
 
-  const second = await openProfile(stack, stack.users.a, headless);
-  try {
+  await inProfile(stack, stack.users.a, headless, async (second) => {
     await second.rp.registerOk('bob');
     expect(await pkb.listCredentials(stack.users.a)).toHaveLength(2);
 
@@ -35,9 +18,7 @@ test('each browser profile signs in with the passkey it registered', async ({ ex
     await second.rp.login();
     await second.rp.expectResult('authenticated:bob');
     await second.ui.expectNoDialog();
-  } finally {
-    await second.context.close();
-  }
+  });
 
   // With automatic sign-in off, the picker lists this profile's account first.
   await extension.configure(stack.users.a, { autoLoginSingle: false });
@@ -50,8 +31,7 @@ test('each browser profile signs in with the passkey it registered', async ({ ex
   await ui.action('picker', 'cancel').click();
   await rp.expectResult('error:NotAllowedError');
 
-  const third = await openProfile(stack, stack.users.a, headless);
-  try {
+  await inProfile(stack, stack.users.a, headless, async (third) => {
     await third.rp.login();
     await expect(third.ui.dialog('picker')).toBeVisible();
     await expect(third.ui.pickerAccounts()).toHaveCount(2);
@@ -64,7 +44,5 @@ test('each browser profile signs in with the passkey it registered', async ({ ex
     await third.rp.login();
     await third.rp.expectResult('authenticated:bob');
     await third.ui.expectNoDialog();
-  } finally {
-    await third.context.close();
-  }
+  });
 });

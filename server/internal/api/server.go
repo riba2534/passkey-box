@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -52,35 +51,77 @@ func New(opts Options) *Server {
 	return s
 }
 
+// route is an HTTP route: a ServeMux pattern and its handler.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routeTable lists every route. docs/API.md and /skill.md must document each
+// /api/v1 pattern (see TestRoutesAreDocumented).
+func (s *Server) routeTable() []route {
+	return []route{
+		{"GET /healthz", s.handleHealth},
+		{"GET " + extensionPath, s.handleExtensionDownload},
+		{"GET /skill.md", s.handleSkill},
+
+		{"GET /api/v1/info", s.handleInfo},
+		{"POST /api/v1/auth/login", s.handleLogin},
+		{"POST /api/v1/auth/logout", s.handleLogout},
+		{"POST /api/v1/auth/register", s.handleRegister},
+
+		{"GET /api/v1/me", s.authed(s.handleMe)},
+		{"PUT /api/v1/me/password", s.sessionOnly(s.handleChangePassword)},
+		{"GET /api/v1/me/tokens", s.sessionOnly(s.handleListTokens)},
+		{"POST /api/v1/me/tokens", s.sessionOnly(s.handleCreateToken)},
+		{"DELETE /api/v1/me/tokens/{token_id}", s.sessionOnly(s.handleDeleteToken)},
+		{"GET /api/v1/me/activity", s.authed(s.handleMyActivity)},
+		{"GET /api/v1/users", s.authed(s.handleUserDirectory)},
+
+		{"GET /api/v1/credentials", s.authed(s.handleListCredentials)},
+		{"POST /api/v1/credentials", s.authed(s.handleCreateCredential)},
+		{"POST /api/v1/credentials/share", s.authed(scoped(s.shareCredentials, false))},
+		{"POST /api/v1/credentials/unshare", s.authed(scoped(s.unshareCredentials, false))},
+		{"POST /api/v1/credentials/transfer", s.authed(scoped(s.transferCredentials, false))},
+		{"POST /api/v1/credentials/leave", s.authed(s.handleLeave)},
+		{"POST /api/v1/credentials/batch-delete", s.authed(scoped(s.deleteCredentials, false))},
+		{"GET /api/v1/credentials/{id}", s.authed(s.handleGetCredential)},
+		{"PATCH /api/v1/credentials/{id}", s.authed(s.handleUpdateCredential)},
+		{"POST /api/v1/credentials/{id}/use", s.authed(s.handleUseCredential)},
+		{"DELETE /api/v1/credentials/{id}", s.authed(s.handleDeleteCredential)},
+
+		{"GET /api/v1/admin/overview", s.admin(s.handleAdminOverview)},
+		{"GET /api/v1/admin/audit", s.admin(s.handleAdminAudit)},
+		{"GET /api/v1/admin/users", s.admin(s.handleAdminListUsers)},
+		{"POST /api/v1/admin/users", s.admin(s.handleAdminCreateUser)},
+		{"POST /api/v1/admin/users/batch-create", s.admin(s.handleAdminBatchCreateUsers)},
+		{"POST /api/v1/admin/users/batch-update", s.admin(s.handleAdminBatchUpdateUsers)},
+		{"POST /api/v1/admin/users/batch-delete", s.admin(s.handleAdminBatchDeleteUsers)},
+		{"GET /api/v1/admin/users/{user_id}", s.admin(s.handleAdminGetUser)},
+		{"PATCH /api/v1/admin/users/{user_id}", s.admin(s.handleAdminUpdateUser)},
+		{"DELETE /api/v1/admin/users/{user_id}", s.admin(s.handleAdminDeleteUser)},
+		{"POST /api/v1/admin/users/{user_id}/revoke-sessions", s.admin(s.handleAdminRevokeSessions)},
+		{"GET /api/v1/admin/users/{user_id}/credentials", s.admin(s.handleAdminListUserCredentials)},
+		{"DELETE /api/v1/admin/users/{user_id}/credentials/{id}", s.admin(s.handleAdminDeleteUserCredential)},
+		{"GET /api/v1/admin/credentials", s.admin(s.handleAdminListCredentials)},
+		{"POST /api/v1/admin/credentials/share", s.admin(scoped(s.shareCredentials, true))},
+		{"POST /api/v1/admin/credentials/unshare", s.admin(scoped(s.unshareCredentials, true))},
+		{"POST /api/v1/admin/credentials/transfer", s.admin(scoped(s.transferCredentials, true))},
+		{"POST /api/v1/admin/credentials/batch-delete", s.admin(scoped(s.deleteCredentials, true))},
+		{"GET /api/v1/admin/credentials/{id}", s.admin(s.handleAdminGetCredential)},
+		{"PATCH /api/v1/admin/credentials/{id}", s.admin(s.handleAdminUpdateCredential)},
+		{"DELETE /api/v1/admin/credentials/{id}", s.admin(s.handleAdminDeleteCredential)},
+	}
+}
+
 func (s *Server) routes() {
 	m := s.mux
-	m.HandleFunc("GET /healthz", s.handleHealth)
-	m.HandleFunc("GET "+extensionPath, s.handleExtensionDownload)
-
-	m.HandleFunc("GET /api/v1/info", s.handleInfo)
-	m.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
-	m.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	m.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
-
-	m.HandleFunc("GET /api/v1/me", s.authed(s.handleMe))
-	m.HandleFunc("PUT /api/v1/me/password", s.authed(s.handleChangePassword))
-
-	m.HandleFunc("GET /api/v1/credentials", s.authed(s.handleListCredentials))
-	m.HandleFunc("POST /api/v1/credentials", s.authed(s.handleCreateCredential))
-	m.HandleFunc("PATCH /api/v1/credentials/{id}", s.authed(s.handleUpdateCredential))
-	m.HandleFunc("POST /api/v1/credentials/{id}/use", s.authed(s.handleUseCredential))
-	m.HandleFunc("DELETE /api/v1/credentials/{id}", s.authed(s.handleDeleteCredential))
-
-	m.HandleFunc("GET /api/v1/admin/users", s.admin(s.handleAdminListUsers))
-	m.HandleFunc("POST /api/v1/admin/users", s.admin(s.handleAdminCreateUser))
-	m.HandleFunc("PATCH /api/v1/admin/users/{user_id}", s.admin(s.handleAdminUpdateUser))
-	m.HandleFunc("DELETE /api/v1/admin/users/{user_id}", s.admin(s.handleAdminDeleteUser))
-	m.HandleFunc("GET /api/v1/admin/users/{user_id}/credentials", s.admin(s.handleAdminListCredentials))
-	m.HandleFunc("DELETE /api/v1/admin/users/{user_id}/credentials/{id}", s.admin(s.handleAdminDeleteCredential))
-	m.HandleFunc("/api/v1/admin/", s.admin(func(w http.ResponseWriter, r *http.Request, _ store.User) {
+	for _, rt := range s.routeTable() {
+		m.HandleFunc(rt.pattern, rt.handler)
+	}
+	m.HandleFunc("/api/v1/admin/", s.admin(func(w http.ResponseWriter, r *http.Request, _ *caller) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint not found")
 	}))
-
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint not found")
 	})
@@ -106,60 +147,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mux.ServeHTTP(w, r)
-}
-
-type authedHandler func(w http.ResponseWriter, r *http.Request, user store.User)
-
-// authed requires a logged-in user (HTTP Basic or session cookie).
-func (s *Server) authed(next authedHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, err := s.currentUser(r)
-		if err != nil {
-			if errors.Is(err, errUnauthorized) {
-				writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
-				return
-			}
-			s.internalError(w, err)
-			return
-		}
-		next(w, r, user)
-	}
-}
-
-// admin requires a logged-in administrator.
-func (s *Server) admin(next authedHandler) http.HandlerFunc {
-	return s.authed(func(w http.ResponseWriter, r *http.Request, user store.User) {
-		if !user.IsAdmin {
-			writeError(w, http.StatusForbidden, "forbidden", "administrator required")
-			return
-		}
-		next(w, r, user)
-	})
-}
-
-var errUnauthorized = errors.New("unauthorized")
-
-// currentUser resolves the caller. A Basic Authorization header takes
-// precedence over the session cookie; a failing Basic header is not retried
-// with the cookie.
-func (s *Server) currentUser(r *http.Request) (store.User, error) {
-	ctx := r.Context()
-	if username, password, ok := r.BasicAuth(); ok {
-		user, err := s.opts.Store.Authenticate(ctx, username, password)
-		if errors.Is(err, store.ErrBadPassword) {
-			return store.User{}, errUnauthorized
-		}
-		return user, err
-	}
-	c, err := r.Cookie(sessionCookie)
-	if err != nil || c.Value == "" {
-		return store.User{}, errUnauthorized
-	}
-	user, err := s.opts.Store.SessionUser(ctx, c.Value, s.opts.Now())
-	if errors.Is(err, store.ErrNotFound) {
-		return store.User{}, errUnauthorized
-	}
-	return user, err
 }
 
 // startSession creates a session for the user and sets the cookie.
@@ -208,6 +195,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"version":            s.opts.Version,
 		"allow_register":     s.opts.AllowRegister,
 		"extension_download": s.extensionFile() != nil,
+		"skill_url":          "/skill.md",
 	})
 }
 
@@ -267,6 +255,8 @@ type errorBody struct {
 type errorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Items lists the failed entries of a batch request.
+	Items []store.ItemError `json:"items,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {

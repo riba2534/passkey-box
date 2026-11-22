@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "../src/lib/config";
-import { decideGet, filterByAllowList, hasExcludedCredential, rankOwnedFirst, selectAlgorithm, type GetDecision } from "../src/lib/decision";
+import {
+  autoLoginPolicy,
+  decideGet,
+  filterByAllowList,
+  hasExcludedCredential,
+  rankOwnedFirst,
+  selectAlgorithm,
+  type GetDecision,
+} from "../src/lib/decision";
 import { effectiveRpId, hostMatchesRpId, isIpAddress } from "../src/lib/rpid";
 
 const on: Settings = { autoLoginSingle: true, conditionalAutoLogin: true };
@@ -124,6 +132,21 @@ describe("decideGet with the launcher's autoLogin policy", () => {
         }
       }
     }
+  });
+});
+
+describe("autoLoginPolicy", () => {
+  it("is owned-only while a passkey another user shared is a candidate", () => {
+    expect(autoLoginPolicy([{ access: "owner" }, { access: "shared" }], "any")).toBe("owned-only");
+    expect(autoLoginPolicy([{ access: "shared" }], "owned-only")).toBe("owned-only");
+  });
+
+  it("keeps the launcher's policy otherwise", () => {
+    expect(autoLoginPolicy([{ access: "owner" }], "any")).toBe("any");
+    // Servers before 0.6.0 send no access field.
+    expect(autoLoginPolicy([{}], "any")).toBe("any");
+    expect(autoLoginPolicy([], "any")).toBe("any");
+    expect(autoLoginPolicy([{ access: "owner" }], "owned-only")).toBe("owned-only");
   });
 });
 

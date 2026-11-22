@@ -36,7 +36,9 @@ const PAGE_UI_CSS = `
 .name, .user { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .name { font-weight: 600; color: #1b1f24; }
 .user { font-size: 12px; color: #6b7280; }
-.tag { flex: none; padding: 1px 6px; border-radius: 4px; background: #eef5ff; color: #0572EC; font-size: 11px; line-height: 16px; font-weight: 500; }
+.tags { flex: 0 1 auto; min-width: 0; max-width: 45%; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.tag { flex: none; max-width: 100%; box-sizing: border-box; padding: 1px 6px; border-radius: 4px; background: #eef5ff; color: #0572EC; font-size: 11px; line-height: 16px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .account:hover .tag, .account:focus-visible .tag { background: #fff; }
 .go { width: 16px; height: 16px; color: #9ca3af; flex: none; }
 .message { display: flex; gap: 12px; padding: 14px 16px 16px; align-items: flex-start; }
@@ -156,6 +158,12 @@ export function createPageUI(doc: Document = document): PageUI {
   function accountButton(c: CandidateSummary): HTMLElement {
     const display = c.user_display_name && c.user_display_name !== c.user_name ? c.user_display_name : "";
     const primary = display || c.user_name || "（无用户名）";
+    const tags: HTMLElement[] = [];
+    if (c.owned) tags.push(h(doc, "span", { class: "tag" }, "本浏览器用过"));
+    if (c.shared_by) {
+      const text = `共享自 ${c.shared_by}`;
+      tags.push(h(doc, "span", { class: "tag", title: text }, text));
+    }
     return h(
       doc,
       "button",
@@ -168,7 +176,7 @@ export function createPageUI(doc: Document = document): PageUI {
         h(doc, "span", { class: "name" }, primary),
         display ? h(doc, "span", { class: "user" }, c.user_name) : null,
       ),
-      c.owned ? h(doc, "span", { class: "tag" }, "本浏览器用过") : null,
+      tags.length ? h(doc, "span", { class: "tags" }, ...tags) : null,
       icon(doc, CHEVRON, "go"),
     );
   }
