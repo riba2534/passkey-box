@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/riba2534/passkey-box/server/internal/api"
 )
 
 // An API token must not renew itself by changing its own user's password,
@@ -76,4 +78,22 @@ func TestActivityHidesAdministratorNotesFromTheUser(t *testing.T) {
 			t.Errorf("administrator's %s lacks the note: %s", path, got)
 		}
 	}
+}
+
+func TestRegistrationCannotTakeTheBootstrapAdminName(t *testing.T) {
+	e := newEnv(t, func(o *api.Options) { o.AllowRegister = true })
+	if _, err := e.store.EnsureAdmin(t.Context(), "admin", "pw", e.clock()); err != nil {
+		t.Fatal(err)
+	}
+	// Another administrator deletes the bootstrap account; until the next
+	// start recreates it, nobody may register the name and be promoted.
+	root := e.createUser("root", "pw", true)
+	admin := e.basic("root", "pw")
+	users := admin.do("GET", "/api/v1/admin/users?q=admin", nil).expect(http.StatusOK).users()
+	if len(users) != 1 || users[0].ID == root.ID {
+		t.Fatalf("users = %+v", users)
+	}
+	admin.do("DELETE", fmt.Sprintf("/api/v1/admin/users/%d", users[0].ID), nil).expect(http.StatusNoContent)
+	e.anon().do("POST", "/api/v1/auth/register", map[string]string{"username": "Admin", "password": "x"}).expectError(http.StatusConflict, "conflict")
+	e.anon().do("POST", "/api/v1/auth/register", map[string]string{"username": "eve", "password": "x"}).expect(http.StatusCreated)
 }

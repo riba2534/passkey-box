@@ -79,7 +79,7 @@ func (f *fixture) auditCount(prefix string) int {
 	return len(ev)
 }
 
-func TestSaveCredentialMovesShares(t *testing.T) {
+func TestSaveCredentialDropsTheSharesOfReplacedCredentials(t *testing.T) {
 	f := newFixture(t, "alice", "bob", "carol")
 	ctx := t.Context()
 	f.save("alice", "b2xk", "GitHub.com", "aA", 0)
@@ -101,14 +101,13 @@ func TestSaveCredentialMovesShares(t *testing.T) {
 		t.Fatalf("shares after the failed save = %v", got)
 	}
 
+	// The new private key reaches nobody until alice shares it again.
 	fresh := f.save("alice", "bmV3", "github.com", "aA", 3*time.Hour)
-	if fresh.Access != AccessOwner || fresh.Owner.Username != "alice" || !slices.Equal(shareNames(fresh), []string{"bob", "carol"}) {
+	if fresh.Access != AccessOwner || fresh.Owner.Username != "alice" || len(fresh.Shares) != 0 {
 		t.Fatalf("replacement = %+v", fresh)
 	}
-	bob := fresh.Shares[0]
-	if !bob.SharedAt.Equal(t0.Add(time.Hour)) || bob.SharedBy == nil || bob.SharedBy.Username != "alice" ||
-		bob.LastUsedAt == nil || !bob.LastUsedAt.Equal(t0.Add(2*time.Hour)) {
-		t.Fatalf("moved share = %+v", bob)
+	if creds, _ := f.s.ListCredentials(ctx, f.users["carol"].ID, ""); len(creds) != 0 {
+		t.Fatalf("carol still sees %+v", creds)
 	}
 	if _, err := f.s.GetAnyCredential(ctx, "b2xk"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old credential = %v", err)

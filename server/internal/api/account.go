@@ -89,6 +89,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	// Start-up makes the holder of the bootstrap administrator's name an
+	// administrator, so nobody may register it while it is free.
+	if s.opts.Store.ReservedUsername(req.Username) {
+		writeError(w, http.StatusConflict, "conflict", "username already exists")
+		return
+	}
 	// Nobody is signed in yet, so the account is created by the system.
 	user, ok := s.createUser(w, r, store.SystemActor, store.NewUser{Username: req.Username, Password: req.Password})
 	if !ok {

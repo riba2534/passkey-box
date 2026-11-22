@@ -131,6 +131,18 @@ type Store struct {
 	// hash, so stale entries never match again.
 	mu       sync.Mutex
 	verified map[[32]byte]string
+
+	// reservedKey is the lookup key of the bootstrap administrator's name
+	// (EnsureAdmin). Start-up makes whoever holds that name an administrator,
+	// so nobody may rename to or from it, or register it.
+	reservedKey string
+}
+
+// ReservedUsername reports whether name is the bootstrap administrator's
+// (PKB_ADMIN_USERNAME), which self-registration must not take.
+func (s *Store) ReservedUsername(name string) bool {
+	_, key, ok := NormalizeUsername(name)
+	return ok && s.reservedKey != "" && key == s.reservedKey
 }
 
 const maxVerifiedEntries = 1024
@@ -352,9 +364,11 @@ func (s *Store) SetDisabled(ctx context.Context, id int64, disabled bool) error 
 // as the system. A new user gets the given password; an existing user keeps
 // its password.
 func (s *Store) EnsureAdmin(ctx context.Context, username, password string, now time.Time) (created bool, err error) {
-	if _, _, ok := NormalizeUsername(username); !ok {
+	_, key, ok := NormalizeUsername(username)
+	if !ok {
 		return false, fmt.Errorf("invalid admin username %q", username)
 	}
+	s.reservedKey = key
 	user, err := resolveUser(ctx, s.db, UserKey{Username: username})
 	switch {
 	case err == nil:

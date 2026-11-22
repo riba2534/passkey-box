@@ -56,6 +56,7 @@ var (
 	// errTokenOwnPassword keeps an API token from renewing itself by changing
 	// its user's password through the administrator endpoints.
 	errTokenOwnPassword = Invalid("an API token cannot change the password of its own user")
+	errReservedUsername = Invalid("this username belongs to the bootstrap administrator (PKB_ADMIN_USERNAME) and cannot be given or taken away")
 	errDuplicate        = Invalid("duplicate item")
 	errDemoteSelf       = Invalid("you cannot remove your own administrator role")
 	errDisableSelf      = Invalid("you cannot disable yourself")
@@ -168,7 +169,8 @@ type fromTo struct {
 
 // updateUser applies u to user and, when anything changed, records
 // user.update. hash is the new password hash when u.Password is set.
-func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUpdate, hash string, now time.Time) (UpdatedUser, error) {
+// reserved is the lookup key of the bootstrap administrator's name, or "".
+func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUpdate, hash, reserved string, now time.Time) (UpdatedUser, error) {
 	self := actor.ID == user.ID
 	switch {
 	case u.IsAdmin != nil && !*u.IsAdmin && self:
@@ -203,6 +205,9 @@ func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUp
 			return UpdatedUser{}, errInvalidUsername
 		}
 		if display != user.Username {
+			if oldKey := strings.ToLower(user.Username); reserved != "" && key != oldKey && (key == reserved || oldKey == reserved) {
+				return UpdatedUser{}, errReservedUsername
+			}
 			if err := usernameTaken(ctx, q, key, user.ID); err != nil {
 				return UpdatedUser{}, err
 			}
@@ -299,7 +304,7 @@ func (s *Store) UpdateUser(ctx context.Context, actor Actor, id int64, u UserUpd
 		if err != nil {
 			return err
 		}
-		out, err = updateUser(ctx, tx, actor, user, u, hashes[0], now)
+		out, err = updateUser(ctx, tx, actor, user, u, hashes[0], s.reservedKey, now)
 		return err
 	})
 	return out, err
@@ -376,7 +381,7 @@ func (s *Store) UpdateUsers(ctx context.Context, actor Actor, edits []UserEdit, 
 			var res UpdatedUser
 			if err == nil {
 				seen[user.ID] = true
-				res, err = updateUser(ctx, tx, actor, user, e.UserUpdate, hashes[i], now)
+				res, err = updateUser(ctx, tx, actor, user, e.UserUpdate, hashes[i], s.reservedKey, now)
 			}
 			if err != nil {
 				if err := be.AddErr("items", i, e.User.value(), err, "user not found"); err != nil {

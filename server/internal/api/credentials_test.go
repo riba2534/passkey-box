@@ -436,7 +436,7 @@ func TestSharedCredentialRules(t *testing.T) {
 	}
 }
 
-func TestReRegisteringKeepsShares(t *testing.T) {
+func TestReRegisteringDropsShares(t *testing.T) {
 	w := newWorld(t)
 	w.register("alice", "b2xk", "github.com", "aGFuZGxl")
 	w.shareWith("alice", "b2xk", "bob")
@@ -450,11 +450,11 @@ func TestReRegisteringKeepsShares(t *testing.T) {
 		Credential accessJSON `json:"credential"`
 	}
 	created.decode(&body)
-	if c := body.Credential; c.ID != "bmV3" || *c.Access != "owner" || len(*c.SharedWith) != 1 ||
-		(*c.SharedWith)[0].User != brief(w.bob) || (*c.SharedWith)[0].SharedAt != "2026-11-20T03:30:00Z" || (*c.SharedWith)[0].LastUsedAt == nil {
+	// A new private key reaches nobody until the owner shares it again.
+	if c := body.Credential; c.ID != "bmV3" || *c.Access != "owner" || len(*c.SharedWith) != 0 {
 		t.Fatalf("replacement = %+v", c)
 	}
-	if got := listIDs(w.as("bob"), "/api/v1/credentials?rp_id=github.com"); !slices.Equal(got, []string{"bmV3", "Ym9i"}) {
+	if got := listIDs(w.as("bob"), "/api/v1/credentials?rp_id=github.com"); !slices.Equal(got, []string{"Ym9i"}) {
 		t.Fatalf("bob's credentials = %v", got)
 	}
 	w.as("bob").do("GET", "/api/v1/credentials/b2xk", nil).expectError(http.StatusNotFound, "not_found")
@@ -600,4 +600,23 @@ func TestPrivateKeyVisibility(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A recipient who learns a credential's user handle can transfer a credential
+// of their own for the same account to the owner, keeping access. When the
+// owner registers that account again, the recipient must not receive the
+// owner's new private key, even after being revoked.
+func TestTransferredDuplicateCannotCaptureTheNextKey(t *testing.T) {
+	w := newWorld(t)
+	w.register("alice", "b2xk", "github.com", "aGFuZGxl")
+	w.shareWith("alice", "b2xk", "bob")
+	w.register("bob", "Ym9i", "github.com", "aGFuZGxl")
+	w.as("bob").do("POST", "/api/v1/credentials/transfer", map[string]any{"ids": []string{"Ym9i"}, "to": "alice", "keep_access": true}).expect(http.StatusOK)
+	w.as("alice").do("POST", "/api/v1/credentials/unshare", map[string]any{"ids": []string{"b2xk"}, "all": true}).expect(http.StatusOK)
+
+	w.as("alice").do("POST", "/api/v1/credentials", newCred("bmV3", "github.com", "aGFuZGxl")).expect(http.StatusCreated)
+	if got := listIDs(w.as("bob"), "/api/v1/credentials"); len(got) != 0 {
+		t.Fatalf("bob sees %v after alice registered a new key", got)
+	}
+	w.as("bob").do("GET", "/api/v1/credentials/bmV3", nil).expectError(http.StatusNotFound, "not_found")
 }

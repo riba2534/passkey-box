@@ -335,28 +335,15 @@ var errCredentialIDTaken = &conflictError{"credential id already exists"}
 // SaveCredential stores a new credential for the user. Credentials the user
 // owns with the same rp_id (case-insensitive) and user_handle are replaced, the
 // way an authenticator overwrites a discoverable credential for the same
-// account, and their shares move to the new credential. If the ID is still
-// taken by another credential, nothing changes and ErrConflict is returned.
-// Statistics on c are ignored.
+// account, together with their shares: a new private key reaches nobody until
+// the owner shares it again. (Moving the shares would let a credential someone
+// else transferred in with keep_access, or a revoked recipient, receive the
+// owner's next key.) If the ID is still taken by another credential, nothing
+// changes and ErrConflict is returned. Statistics on c are ignored.
 func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c Credential, now time.Time) (Credential, error) {
 	var saved Credential
 	err := s.inTx(ctx, false, func(tx *sql.Tx) error {
 		rpKey := strings.ToLower(c.RPID)
-		type shareRow struct {
-			userID, created    int64
-			sharedBy, lastUsed sql.NullInt64
-		}
-		moved, err := queryRows(ctx, tx, func(r rowScanner) (shareRow, error) {
-			var sr shareRow
-			err := r.Scan(&sr.userID, &sr.sharedBy, &sr.created, &sr.lastUsed)
-			return sr, err
-		}, `SELECT s.user_id, s.shared_by, s.created_at, s.last_used_at
-			FROM credential_shares s JOIN credentials c ON c.seq = s.credential_seq
-			WHERE c.user_id = ? AND c.rp_id_key = ? AND c.user_handle = ?
-			ORDER BY s.created_at, s.rowid`, userID, rpKey, c.UserHandle)
-		if err != nil {
-			return err
-		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM credentials WHERE user_id = ? AND rp_id_key = ? AND user_handle = ?`,
 			userID, rpKey, c.UserHandle); err != nil {
@@ -364,14 +351,14 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 		}
 		var exists int
 		// IDs are unique across all users (schema 1).
-		err = tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE id = ?`, c.ID).Scan(&exists)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE id = ?`, c.ID).Scan(&exists)
 		if err == nil {
 			return errCredentialIDTaken
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO credentials
+		_, err = tx.ExecContext(ctx, `INSERT INTO credentials
 			(user_id, id, rp_id, rp_id_key, rp_name, user_handle, user_name, user_display_name, alg,
 			 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
@@ -379,19 +366,6 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now))
 		if err != nil {
 			return err
-		}
-		seq, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		// Several replaced credentials may have been shared with the same
-		// user; the earliest share wins.
-		for _, sr := range moved {
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO credential_shares
-				(credential_seq, user_id, shared_by, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)`,
-				seq, sr.userID, sr.sharedBy, sr.created, sr.lastUsed); err != nil {
-				return err
-			}
 		}
 		saved, err = getAccessible(ctx, tx, userID, c.ID)
 		if saved, err = withShares(ctx, tx, saved, err); err != nil {
