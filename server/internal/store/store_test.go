@@ -98,7 +98,7 @@ func TestPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SaveCredential(ctx, u.ID, Credential{ID: "YQ", RPID: "a.com", UserHandle: "YQ", PrivateKey: "YQ", Alg: -7}, t0); err != nil {
+	if _, err := s.SaveCredential(ctx, SystemActor, u.ID, Credential{ID: "YQ", RPID: "a.com", UserHandle: "YQ", PrivateKey: "YQ", Alg: -7}, t0); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -118,7 +118,7 @@ func TestDeleteUserCascades(t *testing.T) {
 	ctx := t.Context()
 	s := openTest(t)
 	u, _ := s.CreateUser(ctx, "alice", "pw", false, t0)
-	if _, err := s.SaveCredential(ctx, u.ID, Credential{ID: "YQ", RPID: "a.com", UserHandle: "YQ", PrivateKey: "YQ", Alg: -7}, t0); err != nil {
+	if _, err := s.SaveCredential(ctx, SystemActor, u.ID, Credential{ID: "YQ", RPID: "a.com", UserHandle: "YQ", PrivateKey: "YQ", Alg: -7}, t0); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(ctx, "tok", u.ID, t0, t0.Add(time.Hour)); err != nil {

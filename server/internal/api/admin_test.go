@@ -98,8 +98,8 @@ func TestAdminUserManagement(t *testing.T) {
 	if got := credIDs(creds); !slices.Equal(got, []string{"Ym9iMg", "Ym9iMQ"}) {
 		t.Fatalf("bob's credentials = %v", got)
 	}
-	if creds[0].PrivateKey == "" {
-		t.Fatal("admin view should include the full credential")
+	if creds[0].PrivateKey != "" || creds[0].PublicKey != "cHVibGljLWtleQ" || creds[0].UserHandle != "Mg" {
+		t.Fatalf("admin view = %+v, want every field but the private key", creds[0])
 	}
 	if n := len(admin.do("GET", fmt.Sprintf("/api/v1/admin/users/%d/credentials", root.ID), nil).credentials()); n != 0 {
 		t.Fatalf("root has %d credentials", n)
