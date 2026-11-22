@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -51,6 +52,25 @@ func (s *Store) migrate(ctx context.Context, path string, existed bool, now time
 	if version == SchemaVersion {
 		return m, nil
 	}
+	// A logical backup (sqlite3 .dump) does not keep user_version: a
+	// database restored from one has the schema 1 objects at version 0.
+	if version == 0 {
+		shaped, err := hasSchemaV1(ctx, s.db)
+		if err != nil {
+			return m, err
+		}
+		if shaped {
+			if _, err := s.db.ExecContext(ctx, `PRAGMA user_version = 1`); err != nil {
+				return m, err
+			}
+			log.Printf("database has the schema 1 tables at version 0 (restored from a logical backup?); set its version to 1")
+			version, m.From = 1, 1
+		}
+	}
+	if version == SchemaVersion {
+		m.To = version
+		return m, nil
+	}
 	// Refuse a database the migrations cannot take before copying it: a
 	// restart loop would otherwise add a full copy on every attempt.
 	if version < 1 {
@@ -62,6 +82,12 @@ func (s *Store) migrate(ctx context.Context, path string, existed bool, now time
 		snapshot := snapshotPath(path, SchemaVersion, now)
 		if _, err := s.db.ExecContext(ctx, `VACUUM INTO `+sqlString(snapshot)); err != nil {
 			return m, fmt.Errorf("snapshot database before migrating to schema %d: %w", SchemaVersion, err)
+		}
+		// The copy holds every private key: keep it as private as the database.
+		if fi, err := os.Stat(path); err == nil {
+			if err := os.Chmod(snapshot, fi.Mode().Perm()); err != nil {
+				return m, err
+			}
 		}
 		m.Snapshot = snapshot
 	}
@@ -93,6 +119,27 @@ func snapshotPath(path string, version int, now time.Time) string {
 }
 
 func sqlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
+// hasSchemaV1 reports whether the schema 1 objects exist. Some but not all of
+// them is an error: no migration leaves a database like that.
+func hasSchemaV1(ctx context.Context, q queryer) (bool, error) {
+	var objects, columns int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
+		WHERE name IN ('credential_shares', 'api_tokens', 'audit_log', 'credentials_id')`).Scan(&objects); err != nil {
+		return false, err
+	}
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('users')
+		WHERE name IN ('disabled', 'note')`).Scan(&columns); err != nil {
+		return false, err
+	}
+	switch {
+	case objects == 4 && columns == 2:
+		return true, nil
+	case objects == 0 && columns == 0:
+		return false, nil
+	}
+	return false, fmt.Errorf("database has only part of schema 1; restore it from a complete backup")
+}
 
 // checkUniqueCredentialIDs reports a credential ID stored for more than one
 // user, which schema 0 allowed and schema 1 does not.

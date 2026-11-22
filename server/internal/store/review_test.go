@@ -2,6 +2,9 @@ package store
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +48,63 @@ func TestBootstrapAdminNameCannotChangeHands(t *testing.T) {
 	other := openTest(t)
 	if other.ReservedUsername("admin") {
 		t.Fatal("a store without EnsureAdmin reserves a name")
+	}
+}
+
+// sqlite3 .dump does not keep user_version: a migrated database restored from
+// a logical backup must not be migrated (and copied) again.
+func TestLogicalBackupRestoreIsNotMigratedAgain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pkb.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateUser(t.Context(), "alice", "pw", false, t0); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.db, `PRAGMA user_version = 0`)
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open after a logical restore = %v", err)
+	}
+	defer s.Close()
+	if v := userVersion(t, s.db); v != SchemaVersion || s.Migration.Snapshot != "" {
+		t.Fatalf("user_version = %d, migration %+v", v, s.Migration)
+	}
+	if got := snapshots(t, dir); len(got) != 0 {
+		t.Fatalf("snapshots = %v", got)
+	}
+	if _, err := s.Authenticate(t.Context(), "alice", "pw"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPartialSchemaV1IsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pkb.db")
+	writeV0Database(t, path, nil)
+	mustExec(t, openRaw(t, path), `CREATE TABLE audit_log (id INTEGER PRIMARY KEY)`)
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "part of schema 1") {
+		t.Fatalf("Open = %v", err)
+	}
+}
+
+func TestSnapshotIsAsPrivateAsTheDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "passkey-box.db")
+	writeV0Database(t, path, map[int64][]string{1: {"YQ"}})
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fi, err := os.Stat(s.Migration.Snapshot)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("snapshot mode = %v, %v", fi.Mode(), err)
 	}
 }
