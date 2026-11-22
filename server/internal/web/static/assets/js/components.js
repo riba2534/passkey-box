@@ -7,7 +7,7 @@ import {
   h, icon, iconButton, api, errText, sessionEnded, toast, toastError, renderShell, openModal, formDialog, emptyState,
   loading, searchBox, userAvatar, credBrief, algName, field, copyAction, copyText,
 } from './core.js';
-import { parseTotp, canComputeCodes, hotp, totpCounter, groupCode } from './totp.js';
+import { parseTotp, canComputeCodes, hotp, totpCounter, groupCode, trimSpace } from './totp.js';
 
 /* ------------------------------------------------------------------ */
 /* User picker                                                         */
@@ -895,7 +895,7 @@ function fieldRow(f) {
     const code = totpCode(p);
     const secret = h('div', { class: 'cf-secret', hidden: true },
       h('code', null, v),
-      copyAction(v.trim(), '密钥'));
+      copyAction(trimSpace(v), '密钥'));
     value.append(code);
     more.push(secret);
     actions.push(revealButton('密钥', (shown) => { secret.hidden = !shown; }));
@@ -1096,11 +1096,12 @@ function editFields(c, save) {
         previewed = null;
         return hint(true, `内容不能超过 ${MAX_VALUE} 个字符，现在是 ${n} 个`);
       }
+      // The server trims ASCII white space around dates and TOTP values.
+      const text = trimSpace(d.value);
       if (d.type === 'date') {
-        return d.value !== '' && !parseDate(d.value) ? hint(true, '日期格式应为 YYYY-MM-DD，例如 2026-11-23') : hint(false);
+        return text !== '' && !parseDate(text) ? hint(true, '日期格式应为 YYYY-MM-DD，例如 2026-11-23') : hint(false);
       }
       if (d.type !== 'totp') return hint(false);
-      const text = d.value.trim();
       if (text === previewed) return;
       previewed = text;
       const p = parseTotp(text);

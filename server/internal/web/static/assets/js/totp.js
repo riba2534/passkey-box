@@ -7,25 +7,38 @@ const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const ALGORITHMS = { SHA1: 'SHA-1', SHA256: 'SHA-256', SHA512: 'SHA-512' };
 
 /**
- * decodeBase32 decodes a TOTP secret as docs/API.md describes it: case does
- * not matter, spaces and "-" are ignored and "=" padding may follow.
+ * trimSpace removes ASCII white space (space, \t, \n, \r, \f, \v) from both
+ * ends, as the server and the extension do. String.prototype.trim would also
+ * remove characters such as U+0085 and U+FEFF that they keep.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function trimSpace(s) {
+  return s.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
+}
+
+/**
+ * decodeBase32 decodes a TOTP secret by the rules the server and the
+ * extension share: ASCII white space and "-" are ignored, "=" padding may
+ * end it, and case does not matter. Only A-Z, a-z and 2-7 are checked for
+ * before upper-casing, which would turn "ß" into "SS".
  *
  * @param {string} text
  * @returns {Uint8Array|null} The bytes, at least one, or null when the text
  *   is not base32.
  */
 function decodeBase32(text) {
-  const s = String(text).toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
+  let s = String(text).replace(/[ \t\n\r\f\v-]/g, '').replace(/=+$/, '');
   // Leftovers of 1, 3 or 6 characters cannot come from whole bytes.
-  if (!s || [1, 3, 6].includes(s.length % 8)) return null;
+  if (!/^[A-Za-z2-7]+$/.test(s) || [1, 3, 6].includes(s.length % 8)) return null;
+  s = s.toUpperCase();
   const out = new Uint8Array(Math.floor((s.length * 5) / 8));
   let bits = 0;
   let acc = 0;
   let n = 0;
   for (const ch of s) {
-    const v = BASE32.indexOf(ch);
-    if (v < 0) return null;
-    acc = ((acc << 5) | v) & 0xffff;
+    acc = ((acc << 5) | BASE32.indexOf(ch)) & 0xffff;
     bits += 5;
     if (bits >= 8) {
       bits -= 8;
@@ -53,7 +66,7 @@ function decodeBase32(text) {
  *   is not usable (Chinese text for the form).
  */
 export function parseTotp(value) {
-  const text = String(value || '').trim();
+  const text = trimSpace(String(value || ''));
   if (!text) return { error: '请输入密钥' };
   const params = { secret: null, algorithm: 'SHA-1', digits: 6, period: 30 };
   if (!/^otpauth:/i.test(text)) {
@@ -61,13 +74,17 @@ export function parseTotp(value) {
     return params.secret ? params : { error: '密钥不是有效的 base32' };
   }
 
+  // The server's URL parser refuses control characters, which the browser's
+  // would drop or escape, and malformed %-escapes, which it would keep.
   let url;
   try {
+    if (/[\x00-\x1f\x7f]/.test(text)) throw new Error('control character');
     url = new URL(text);
   } catch {
     return { error: 'otpauth:// 链接格式不正确' };
   }
   if (url.host.toLowerCase() !== 'totp') return { error: '只支持 otpauth://totp/ 链接' };
+  if (/%(?![0-9A-Fa-f]{2})/.test(url.search)) return { error: '链接的参数格式不正确' };
   // Parameter names do not depend on case; the first of a name counts.
   const q = new Map();
   for (const [k, v] of url.searchParams) {
@@ -82,12 +99,12 @@ export function parseTotp(value) {
     if (!params.algorithm) return { error: 'algorithm 只能是 SHA1、SHA256 或 SHA512' };
   }
   if (q.get('digits')) {
-    const d = /^\d+$/.test(q.get('digits')) ? Number(q.get('digits')) : 0;
-    if (d < 6 || d > 8) return { error: 'digits 只能是 6、7 或 8' };
-    params.digits = d;
+    if (!['6', '7', '8'].includes(q.get('digits'))) return { error: 'digits 只能是 6、7 或 8' };
+    params.digits = Number(q.get('digits'));
   }
   if (q.get('period')) {
-    const p = /^\d+$/.test(q.get('period')) ? Number(q.get('period')) : 0;
+    // Digits only, leading zeros allowed: "030" is 30.
+    const p = /^[0-9]+$/.test(q.get('period')) ? Number(q.get('period')) : 0;
     if (p < 1 || p > 300) return { error: 'period 必须是 1 到 300 秒' };
     params.period = p;
   }
