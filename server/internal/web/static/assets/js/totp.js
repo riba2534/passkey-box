@@ -11,10 +11,10 @@ const ALGORITHMS = { SHA1: 'SHA-1', SHA256: 'SHA-256', SHA512: 'SHA-512' };
  * not matter, spaces and "-" are ignored and "=" padding may follow.
  *
  * @param {string} text
- * @returns {Uint8Array|null} The bytes, or null when the text is not base32
- *   or decodes to nothing.
+ * @returns {Uint8Array|null} The bytes, at least one, or null when the text
+ *   is not base32.
  */
-export function decodeBase32(text) {
+function decodeBase32(text) {
   const s = String(text).toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
   // Leftovers of 1, 3 or 6 characters cannot come from whole bytes.
   if (!s || [1, 3, 6].includes(s.length % 8)) return null;
@@ -32,7 +32,7 @@ export function decodeBase32(text) {
       out[n++] = (acc >> bits) & 0xff;
     }
   }
-  return out.length ? out : null;
+  return out;
 }
 
 /**
@@ -41,8 +41,6 @@ export function decodeBase32(text) {
  * @property {'SHA-1'|'SHA-256'|'SHA-512'} algorithm  A WebCrypto hash name.
  * @property {number} digits   6 to 8.
  * @property {number} period   Seconds, 1 to 300.
- * @property {string} issuer   From the otpauth:// link, or "".
- * @property {string} account  The link's label, or "".
  */
 
 /**
@@ -57,7 +55,7 @@ export function decodeBase32(text) {
 export function parseTotp(value) {
   const text = String(value || '').trim();
   if (!text) return { error: '请输入密钥' };
-  const params = { secret: null, algorithm: 'SHA-1', digits: 6, period: 30, issuer: '', account: '' };
+  const params = { secret: null, algorithm: 'SHA-1', digits: 6, period: 30 };
   if (!/^otpauth:/i.test(text)) {
     params.secret = decodeBase32(text);
     return params.secret ? params : { error: '密钥不是有效的 base32' };
@@ -92,12 +90,6 @@ export function parseTotp(value) {
     const p = /^\d+$/.test(q.get('period')) ? Number(q.get('period')) : 0;
     if (p < 1 || p > 300) return { error: 'period 必须是 1 到 300 秒' };
     params.period = p;
-  }
-  params.issuer = q.get('issuer') || '';
-  try {
-    params.account = decodeURIComponent(url.pathname.replace(/^\//, ''));
-  } catch {
-    params.account = url.pathname.replace(/^\//, '');
   }
   return params;
 }
@@ -144,17 +136,6 @@ export async function hotp(secret, counter, algorithm = 'SHA-1', digits = 6) {
 export function totpCounter(params, unixSeconds) {
   const s = Math.floor(unixSeconds);
   return { counter: Math.floor(s / params.period), remaining: params.period - (s % params.period) };
-}
-
-/**
- * totp computes the RFC 6238 code at a moment.
- *
- * @param {TotpParams} params
- * @param {number} unixSeconds
- * @returns {Promise<string>}
- */
-export function totp(params, unixSeconds) {
-  return hotp(params.secret, totpCounter(params, unixSeconds).counter, params.algorithm, params.digits);
 }
 
 /**
