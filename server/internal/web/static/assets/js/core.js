@@ -91,6 +91,13 @@ const ICONS = {
   clipboard: '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
   activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/>',
+  transfer: '<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>',
+  edit: '<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>',
+  'user-plus': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  refresh: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
 };
 
 export function icon(name) {
@@ -209,18 +216,24 @@ export function userAvatar(name, size) {
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
 
+// ApiError is what api() throws. Batch requests that fail on some items
+// carry them in items (see components.js batchError).
 class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, items) {
     super(message);
     this.status = status;
     this.code = code;
+    if (items) this.items = items;
   }
 }
 
 const ERROR_TEXT = {
   network: '无法连接到服务器，请检查网络',
   unauthorized: '登录已失效，请重新登录',
+  account_disabled: '账户已被停用',
   forbidden: '没有权限执行此操作',
+  read_only_token: '只读令牌不能执行修改操作',
+  token_not_allowed: '这个操作不能使用 API 令牌',
   registration_disabled: '服务器未开启注册',
   not_found: '内容不存在或已被删除',
   conflict: '名称已存在',
@@ -233,9 +246,16 @@ export function errText(err, overrides) {
   return (overrides && overrides[err.code]) || ERROR_TEXT[err.code] || '操作失败，请重试';
 }
 
-// toastError reports a failed request; a 401 was already handled by api().
+// sessionEnded reports an error that means the user is signed out: an
+// expired session or a disabled account. api() has already gone back to
+// the login page and said why, so callers stay quiet about it.
+export function sessionEnded(err) {
+  return err.status === 401 || err.code === 'account_disabled';
+}
+
+// toastError reports a failed request unless api() already handled it.
 export function toastError(err, overrides) {
-  if (err.status !== 401) toast(errText(err, overrides), 'error');
+  if (!sessionEnded(err)) toast(errText(err, overrides), 'error');
 }
 
 export async function api(method, path, body) {
@@ -260,8 +280,8 @@ export async function api(method, path, body) {
   }
   if (!res.ok) {
     const e = (data && data.error) || {};
-    const err = new ApiError(res.status, e.code || 'internal', e.message || res.statusText);
-    if (res.status === 401 && !path.startsWith('/auth/') && state.me) sessionLost();
+    const err = new ApiError(res.status, e.code || 'internal', e.message || res.statusText, e.items);
+    if (sessionEnded(err) && !path.startsWith('/auth/') && state.me) sessionLost(err);
     throw err;
   }
   return data;
@@ -271,11 +291,11 @@ export async function refreshMe() {
   state.me = (await api('GET', '/me')).user;
 }
 
-function sessionLost() {
+function sessionLost(err) {
   state.me = null;
   resetData();
   closeModal();
-  toast('登录已失效，请重新登录', 'error');
+  toast(ERROR_TEXT[err.code === 'account_disabled' ? err.code : 'unauthorized'], 'error');
   go('#/login');
 }
 
@@ -310,8 +330,9 @@ export function closeModal() {
 }
 
 // openModal renders a dialog. build(close) returns its body and footer;
-// onClose runs once however the dialog is closed.
-export function openModal(title, build, onClose) {
+// onClose runs once however the dialog is closed. opts.wide gives lists
+// and tables more room.
+export function openModal(title, build, onClose, opts) {
   closeModal();
   const previous = document.activeElement;
   let closed = false;
@@ -327,14 +348,14 @@ export function openModal(title, build, onClose) {
   const onKey = (e) => {
     if (e.key === 'Escape') close();
   };
-  const dialog = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+  const dialog = h('div', { class: 'modal' + (opts && opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'modal-head' }, h('h2', { class: 'modal-title' }, title)),
     build(close));
   const backdrop = h('div', { class: 'modal-backdrop', onmousedown: (e) => { if (e.target === backdrop) close(); } }, dialog);
   $overlay.replaceChildren(backdrop);
   document.addEventListener('keydown', onKey);
   modalCleanup = close;
-  const focusable = dialog.querySelector('input, .btn-primary, .btn-danger');
+  const focusable = dialog.querySelector('input, textarea, .btn-primary, .btn-danger');
   if (focusable) focusable.focus();
   return close;
 }
@@ -373,6 +394,9 @@ export async function confirmDelete(dialog, path, errOverrides) {
 }
 
 // formDialog shows a form; onSubmit(values) returns an error message or "".
+// A field is { name, label, type, value, placeholder, autocomplete, hint }:
+// type is an input type, 'checkbox' (value is a boolean) or 'textarea';
+// hint is a note under the input.
 export function formDialog({ title, intro, fields, submitText, onSubmit }) {
   openModal(title, (close) => {
     const inputs = {};
@@ -399,12 +423,15 @@ export function formDialog({ title, intro, fields, submitText, onSubmit }) {
       intro ? h('p', null, intro) : null,
       fields.map((f) => {
         const id = 'f-' + f.name;
+        const hint = f.hint ? h('div', { class: 'form-hint' }, f.hint) : null;
         if (f.type === 'checkbox') {
-          inputs[f.name] = h('input', { type: 'checkbox', id });
-          return h('div', { class: 'form-row' }, h('label', { class: 'checkbox', for: id }, inputs[f.name], f.label));
+          inputs[f.name] = h('input', { type: 'checkbox', id, checked: f.value });
+          return h('div', { class: 'form-row' }, h('label', { class: 'checkbox', for: id }, inputs[f.name], f.label), hint);
         }
-        inputs[f.name] = h('input', { class: 'input', id, type: f.type || 'text', autocomplete: f.autocomplete || 'off', placeholder: f.placeholder || '' });
-        return formRow(f.label, inputs[f.name]);
+        inputs[f.name] = f.type === 'textarea'
+          ? h('textarea', { class: 'input textarea', id, rows: 6, spellcheck: 'false', placeholder: f.placeholder || '', value: f.value })
+          : h('input', { class: 'input', id, type: f.type || 'text', autocomplete: f.autocomplete || 'off', placeholder: f.placeholder || '', value: f.value });
+        return formRow(f.label, inputs[f.name], hint);
       }),
       error),
     h('div', { class: 'modal-foot' },
@@ -451,8 +478,8 @@ export function field(label, value, opts) {
     o.actions && o.actions.length ? h('div', { class: 'field-actions' }, o.actions) : null);
 }
 
-export function formRow(label, input) {
-  return h('div', { class: 'form-row' }, h('label', { for: input.id }, label), input);
+export function formRow(label, input, hint) {
+  return h('div', { class: 'form-row' }, h('label', { for: input.id }, label), input, hint);
 }
 
 // usernameError checks a trimmed username against the docs/API.md rule.

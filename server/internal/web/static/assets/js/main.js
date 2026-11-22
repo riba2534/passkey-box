@@ -2,7 +2,7 @@
 
 import {
   $app, state, h, icon, iconButton, brandMark, userAvatar, api, errText, toast,
-  closeModal, refreshMe, resetData, formRow, usernameError, roleText, installShell, go,
+  closeModal, refreshMe, resetData, sessionEnded, formRow, usernameError, roleText, installShell, go,
 } from './core.js';
 import passkeys from './pages/passkeys.js';
 import activity from './pages/activity.js';
@@ -32,8 +32,8 @@ import settings from './pages/settings.js';
  * @property {(route: Route) => (Promise<unknown>|undefined)} [load]
  *   Runs when the page is visited. Return a promise to fetch data: the shell
  *   renders at once (show loading() for missing data) and again when it
- *   settles. A rejection other than 401 becomes an error toast, so catch the
- *   errors the page displays itself.
+ *   settles. A rejection becomes an error toast (unless sessionEnded), so
+ *   catch the errors the page displays itself.
  * @property {() => (Promise<unknown>|undefined)} [preload]
  *   Like load, but runs on every route change while the page is visible in
  *   the sidebar; use it for the data count() needs.
@@ -103,7 +103,7 @@ async function onRoute() {
   try {
     await Promise.all(loads);
   } catch (err) {
-    if (err.status === 401) return;
+    if (sessionEnded(err)) return;
     toast(errText(err), 'error');
   }
   if (state.route === r && state.me) renderShell();

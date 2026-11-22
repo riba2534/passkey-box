@@ -7,6 +7,7 @@ import {
   fmtDate, fmtDateTime, emptyState, loading, field, usernameError, roleText,
   lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
+import { credentialBadges } from '../components.js';
 
 async function loadUsers() {
   state.users = (await api('GET', '/admin/users')).users;
@@ -224,7 +225,7 @@ function renderUserDetail(u) {
     credCard = h('div', { class: 'card' }, creds.map((c) => h('div', { class: 'subitem' },
       siteAvatar(c.rp_id, credTitle(c), 'sm'),
       h('div', { class: 'item-main' },
-        h('div', { class: 'item-title' }, h('span', { class: 'text' }, credTitle(c)), c.label ? h('span', { class: 'badge gray' }, c.label) : null),
+        h('div', { class: 'item-title' }, h('span', { class: 'text' }, credTitle(c)), c.label ? h('span', { class: 'badge gray' }, c.label) : null, credentialBadges(c)),
         h('div', { class: 'item-sub' }, credAccount(c)),
         h('div', { class: 'item-meta' }, `创建于 ${fmtDate(c.created_at)} · ${lastUsedShort(c.last_used_at)} · ${c.use_count} 次`)),
       iconButton('trash', '删除通行密钥', () => deleteUserCred(u, c), 'danger'))));

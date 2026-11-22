@@ -1,6 +1,6 @@
 // 账户设置: the signed-in user's account and password.
 
-import { state, h, api, errText, toast, refreshMe, singlePage, field, formRow, roleText, fmtDateTime } from '../core.js';
+import { state, h, api, errText, sessionEnded, toast, refreshMe, singlePage, field, formRow, roleText, fmtDateTime } from '../core.js';
 
 export default {
   id: 'settings',
@@ -31,7 +31,7 @@ function renderSettingsPage() {
       old.value = next.value = confirm.value = '';
       toast('密码已修改，请在插件中使用新密码');
     } catch (err) {
-      if (err.status !== 401) error.textContent = errText(err);
+      if (!sessionEnded(err)) error.textContent = errText(err);
     } finally {
       submit.disabled = false;
     }

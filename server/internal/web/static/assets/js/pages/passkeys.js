@@ -6,6 +6,7 @@ import {
   siteAvatar, credTitle, credAccount, algName, fmtDateTime,
   emptyState, loading, field, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
+import { credentialBadges } from '../components.js';
 
 async function loadCreds() {
   state.creds = (await api('GET', '/credentials')).credentials;
@@ -106,7 +107,7 @@ function renderPasskeyList(container, countEl) {
   },
   siteAvatar(c.rp_id, credTitle(c)),
   h('div', { class: 'item-main' },
-    h('div', { class: 'item-title' }, h('span', { class: 'text' }, credTitle(c)), c.label ? h('span', { class: 'badge gray' }, c.label) : null),
+    h('div', { class: 'item-title' }, h('span', { class: 'text' }, credTitle(c)), c.label ? h('span', { class: 'badge gray' }, c.label) : null, credentialBadges(c)),
     h('div', { class: 'item-sub' }, credAccount(c))));
 
   const nodes = [];
