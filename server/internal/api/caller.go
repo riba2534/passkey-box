@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/riba2534/passkey-box/server/internal/store"
@@ -46,21 +47,40 @@ type authedHandler func(w http.ResponseWriter, r *http.Request, c *caller)
 
 var errUnauthorized = errors.New("unauthorized")
 
-// bearerToken returns the token of an "Authorization: Bearer" header.
-func bearerToken(r *http.Request) (string, bool) {
-	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") {
-		return "", false
+// authScheme splits the Authorization header into its scheme, in lower case,
+// and the credentials after it.
+func authScheme(r *http.Request) (scheme, credentials string) {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	if i := strings.IndexAny(h, " \t"); i >= 0 {
+		return strings.ToLower(h[:i]), strings.TrimSpace(h[i+1:])
 	}
-	return strings.TrimSpace(token), true
+	return strings.ToLower(h), ""
 }
 
-// currentCaller resolves the caller. An Authorization header (Basic or
-// Bearer) takes precedence over the session cookie; a failing header is not
-// retried with the cookie.
+// crossSite reports a request a browser sent on behalf of another site, by
+// Sec-Fetch-Site or, from browsers without it, Origin.
+func crossSite(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
+		return site != "same-origin" && site != "none"
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		return err != nil || !strings.EqualFold(u.Host, r.Host)
+	}
+	return false
+}
+
+// currentCaller resolves the caller. An Authorization header with the Basic
+// or Bearer scheme takes precedence over the session cookie; a failing or
+// malformed one is not retried with the cookie.
 func (s *Server) currentCaller(r *http.Request) (*caller, error) {
 	ctx := r.Context()
-	if username, password, ok := r.BasicAuth(); ok {
+	scheme, secret := authScheme(r)
+	if scheme == "basic" {
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			return nil, errUnauthorized
+		}
 		user, err := s.opts.Store.Authenticate(ctx, username, password)
 		if errors.Is(err, store.ErrBadPassword) {
 			return nil, errUnauthorized
@@ -70,7 +90,7 @@ func (s *Server) currentCaller(r *http.Request) (*caller, error) {
 		}
 		return &caller{User: user, Method: authBasic}, nil
 	}
-	if secret, ok := bearerToken(r); ok {
+	if scheme == "bearer" {
 		user, token, err := s.opts.Store.TokenUser(ctx, secret, s.opts.Now())
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, errUnauthorized
@@ -113,6 +133,12 @@ func (s *Server) authed(next authedHandler) http.HandlerFunc {
 		}
 		if c.User.Disabled {
 			accountDisabled(w)
+			return
+		}
+		// The browser attaches the session cookie to requests other sites
+		// make, too (SameSite=Lax still covers sibling subdomains).
+		if c.Method == authSession && r.Method != http.MethodGet && r.Method != http.MethodHead && crossSite(r) {
+			writeError(w, http.StatusForbidden, "forbidden", "cross-site request refused")
 			return
 		}
 		if c.readOnly() && r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -97,3 +97,76 @@ func TestRegistrationCannotTakeTheBootstrapAdminName(t *testing.T) {
 	e.anon().do("POST", "/api/v1/auth/register", map[string]string{"username": "Admin", "password": "x"}).expectError(http.StatusConflict, "conflict")
 	e.anon().do("POST", "/api/v1/auth/register", map[string]string{"username": "eve", "password": "x"}).expect(http.StatusCreated)
 }
+
+// raw sends a request with extra headers through c's HTTP client (and so its
+// cookie jar), without c's own credentials.
+func (c *client) raw(method, path string, headers map[string]string) int {
+	c.e.t.Helper()
+	req, err := http.NewRequest(method, c.e.srv.URL+path, strings.NewReader(`{"label":"x"}`))
+	if err != nil {
+		c.e.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		c.e.t.Fatal(err)
+	}
+	res.Body.Close()
+	return res.StatusCode
+}
+
+func TestMalformedAuthorizationIsNotRetriedWithTheCookie(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	b := e.browser()
+	b.do("POST", "/api/v1/auth/login", map[string]string{"username": "alice", "password": "pw"}).expect(http.StatusOK)
+	for _, h := range []string{"Basic", "Basic !!!", "basic\tYWxpY2U6cHc", "Bearer", "Bearer   ", "bearer\tpkb_x", "BEARER pkb_x"} {
+		if got := b.raw("GET", "/api/v1/me", map[string]string{"Authorization": h}); got != http.StatusUnauthorized {
+			t.Errorf("Authorization %q = %d, want 401", h, got)
+		}
+	}
+	// Other schemes are not ours: the cookie still counts.
+	if got := b.raw("GET", "/api/v1/me", map[string]string{"Authorization": "Digest x"}); got != http.StatusOK {
+		t.Errorf("Digest = %d", got)
+	}
+}
+
+func TestSessionsRefuseCrossSiteWrites(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	e.basic("alice", "pw").do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	b := e.browser()
+	b.do("POST", "/api/v1/auth/login", map[string]string{"username": "alice", "password": "pw"}).expect(http.StatusOK)
+	host := strings.TrimPrefix(e.srv.URL, "http://")
+
+	for _, tc := range []struct {
+		method  string
+		headers map[string]string
+		want    int
+	}{
+		{"PATCH", map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		{"PATCH", map[string]string{"Sec-Fetch-Site": "same-site"}, http.StatusForbidden},
+		{"PATCH", map[string]string{"Origin": "https://tu.example.com"}, http.StatusForbidden},
+		{"PATCH", map[string]string{"Sec-Fetch-Site": "same-origin"}, http.StatusOK},
+		{"PATCH", map[string]string{"Origin": "http://" + host}, http.StatusOK},
+		{"PATCH", nil, http.StatusOK}, // not a browser
+		{"GET", map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusOK},
+	} {
+		if got := b.raw(tc.method, "/api/v1/credentials/YQ", tc.headers); got != tc.want {
+			t.Errorf("%s %v = %d, want %d", tc.method, tc.headers, got, tc.want)
+		}
+	}
+	// HTTP Basic is not a cookie a browser attaches by itself.
+	basic := e.basic("alice", "pw")
+	req, _ := http.NewRequest("PATCH", e.srv.URL+"/api/v1/credentials/YQ", strings.NewReader(`{"label":"y"}`))
+	req.SetBasicAuth("alice", "pw")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	res, err := basic.http.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("basic cross-site = %v %v", res, err)
+	}
+	res.Body.Close()
+}
