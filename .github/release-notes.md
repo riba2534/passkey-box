@@ -18,3 +18,5 @@ sha256sum -c passkey-box-extension-<版本>.zip.sha256
 ## AnyBrowser
 
 `passkey-box-extension-anybrowser-<版本>.zip` 是 AnyBrowser 内置版本，预填其指定的服务器地址。
+
+从 v0.5.0 起，`managed-config.json` 可以带 `"autoLogin": "owned-only"`：多个 Profile 共用一个账号时，扩展只自动使用在本 Profile 注册或用过的通行密钥，其他账号先在选择框里选一次。不带这个字段时行为不变，详见 [README](https://github.com/riba2534/passkey-box#预置账号)。

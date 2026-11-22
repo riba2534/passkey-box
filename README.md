@@ -65,7 +65,7 @@ Passkey Box 由两部分组成：
 | 模块 | 能力 |
 |---|---|
 | **注册** | 生成并保存通行密钥。同一网站同一账号重复注册会覆盖旧的。命中 `excludeCredentials` 时返回 `InvalidStateError`。 |
-| **登录** | 按 `allowCredentials` 匹配，多个候选时优先本浏览器 Profile 用过的账号，否则选择账号。支持 conditional mediation。 |
+| **登录** | 按 `allowCredentials` 匹配，多个候选时优先本浏览器 Profile 用过的账号，否则选择账号；启动器可以限定只自动使用本浏览器 Profile 用过的账号。支持 conditional mediation。 |
 | **认证器** | ES256（P-256）与 RS256；`none` 证明；BE/BS 备份标志置位；返回对象通过 `instanceof PublicKeyCredential`，实现 `toJSON()` 等 WebAuthn L3 方法 |
 | **扩展界面** | 页面内选择框与提示条；弹出窗口按「当前网站 / 全部」列出通行密钥，可搜索、查看详情、删除；两个自动登录开关 |
 | **Web 后台** | 我的通行密钥（按网站分组、搜索、备注、使用统计）、用户管理（管理员）、账户设置、插件下载与安装指引；适配手机宽度，可添加到手机主屏幕 |
@@ -158,6 +158,8 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 | 一个也没有 | 提示未找到，可「使用其他方式」交给浏览器原生实现，或取消 |
 | 页面打开时的自动填充式请求（conditional mediation） | 只有 1 个候选时直接签名；多个候选时与上面相同。无候选或服务器不可用时保持静默。 |
 
+启动器在 `managed-config.json` 里设置 `"autoLogin": "owned-only"` 时，上表中的直接签名只适用于本浏览器 Profile 注册或用过的通行密钥，其他账号即使是唯一候选也先弹出选择框，见[预置账号](#预置账号)。
+
 扩展在本浏览器 Profile 的本地存储里记下在这里注册或登录用过的通行密钥 ID（最多 500 个，超出时淘汰最久没用的），不上传服务器，退出登录时一并清除。多个 Profile 共用一个 Passkey Box 账号时（例如 AnyBrowser 的多个身份），每个 Profile 直接登录自己注册的网站账号；在选择框里选中的账号也会记下。
 
 ### 注册
@@ -179,10 +181,19 @@ make zip-extension PKB_DEFAULT_SERVER_URL=https://passkey.example.com
 用 `--load-extension` 加载解压目录的启动器（例如 [AnyBrowser](https://github.com/riba2534/anybrowser)）可以在 `manifest.json` 旁放一个 `managed-config.json`：
 
 ```json
-{ "serverUrl": "https://passkey.example.com", "username": "alice", "password": "…" }
+{ "serverUrl": "https://passkey.example.com", "username": "alice", "password": "…", "autoLogin": "owned-only" }
 ```
 
-扩展每次启动时读取这个文件，三项齐全就用它登录，覆盖之前保存的账号；文件不存在或内容不完整时保持原样。文件里是明文密码，请只放在当前用户可读的目录。
+扩展每次启动时读取这个文件，账号三项齐全就用它登录，覆盖之前保存的账号；文件不存在或账号不完整时保持原样。文件里是明文密码，请只放在当前用户可读的目录。
+
+可选的 `autoLogin` 决定哪些通行密钥可以不经选择直接登录：
+
+| 取值 | 行为 |
+|---|---|
+| `"any"`，缺省或无法识别时也按它处理 | 与未预置账号时相同，见[登录时用哪个账号](#登录时用哪个账号) |
+| `"owned-only"` | 只自动使用在本浏览器 Profile 注册或用过的通行密钥。其他账号即使是唯一候选，也先弹出选择框，页面打开时的自动填充请求也一样；选过一次后，下次直接登录。两个设置开关照常生效。 |
+
+多个 Profile 共用一个 Passkey Box 账号时（AnyBrowser 默认写入 `"owned-only"`），这样可以避免一个 Profile 静默登录成另一个 Profile 注册的网站账号。策略和账号一起保存在扩展里：文件被移除后，扩展保留上次的账号和策略，退出登录也不清除策略；文件重新出现时以文件为准。策略为 `"owned-only"` 时，弹出窗口和选项页的设置里会显示一行说明。
 
 ## 工作原理
 

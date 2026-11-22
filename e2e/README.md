@@ -29,7 +29,7 @@ npx playwright test --list                    # 列出用例
 | `tests/extension/` | 扩展 + 服务端用例 |
 | `support/` | 端口与路径、进程管理、服务端 API 客户端、RP 页面对象、扩展 fixture、虚拟认证器 |
 
-扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。模拟多个浏览器 Profile 的用例用 `launchProfile` 和 `extensionIn` 另开独立上下文。
+扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。模拟多个浏览器 Profile 的用例用 `launchProfile` 和 `extensionIn` 另开独立上下文；预置账号的用例（`managed.spec.ts`）像 AnyBrowser 那样为每个上下文复制一份扩展并写入 `managed-config.json`。
 
 ## RP 页面约定
 
