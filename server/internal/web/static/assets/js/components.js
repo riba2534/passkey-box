@@ -268,7 +268,8 @@ export async function runBatch({ path, body, title, describe, confirmText, dange
  * @property {() => void} clear
  * @property {number} size  Read-only.
  * @property {() => Array<string|number>} ids  Selected ids in the order they were added.
- * @property {(fn: () => void) => () => void} onChange  Subscribes; returns the unsubscribe function.
+ * @property {(el: Element, update: () => void) => void} follow  Runs update on
+ *   every change while el is in the document, until a redraw removes el.
  */
 
 /**
@@ -279,10 +280,22 @@ export async function runBatch({ path, body, title, describe, confirmText, dange
  */
 export function selection() {
   const chosen = new Set();
-  const listeners = new Set();
-  const changed = () => {
-    for (const fn of [...listeners]) fn();
+  // The widgets following the selection. Pages render synchronously and are
+  // inserted right away, so a widget counts as shown once it is found in the
+  // document after the task that built it, and as gone once it is not.
+  const widgets = new Set();
+  let sweeping = false;
+  const visit = (notify) => {
+    for (const w of [...widgets]) {
+      if (w.el.isConnected) {
+        w.shown = true;
+        if (notify) w.update();
+      } else if (w.shown) {
+        widgets.delete(w);
+      }
+    }
   };
+  const changed = () => visit(true);
   return {
     has: (id) => chosen.has(id),
     toggle(id, on = !chosen.has(id)) {
@@ -305,30 +318,17 @@ export function selection() {
       return chosen.size;
     },
     ids: () => [...chosen],
-    onChange(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
+    follow(el, update) {
+      widgets.add({ el, update, shown: false });
+      // Once the redraw that built el is done, drop the widgets it replaced.
+      if (sweeping) return;
+      sweeping = true;
+      queueMicrotask(() => {
+        sweeping = false;
+        visit(false);
+      });
     },
   };
-}
-
-// follow runs update on every change of sel while el is in the document,
-// and unsubscribes once a redraw has removed el. Pages render synchronously
-// and are inserted right away, so el counts as shown after the current task
-// even if the selection does not change while it is on screen.
-function follow(sel, el, update) {
-  let shown = false;
-  queueMicrotask(() => {
-    if (el.isConnected) shown = true;
-  });
-  const off = sel.onChange(() => {
-    if (el.isConnected) {
-      shown = true;
-      update();
-    } else if (shown) {
-      off();
-    }
-  });
 }
 
 /**
@@ -356,7 +356,7 @@ export function selectionBar(sel, actions) {
     count.textContent = `已选 ${sel.size} 项`;
   };
   update();
-  follow(sel, bar, update);
+  sel.follow(bar, update);
   return bar;
 }
 
@@ -378,7 +378,7 @@ export function selectBox(sel, id, name) {
     onclick: (e) => e.stopPropagation(),
     onchange: () => sel.toggle(id, box.checked),
   });
-  follow(sel, box, () => {
+  sel.follow(box, () => {
     box.checked = sel.has(id);
   });
   return box;
@@ -419,7 +419,7 @@ export function selectAllBox(sel, ids) {
     box.indeterminate = n > 0 && n < all.length;
   };
   update();
-  follow(sel, box, update);
+  sel.follow(box, update);
   box.refresh = update;
   return box;
 }
