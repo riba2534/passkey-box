@@ -2,7 +2,7 @@
 // them, with details, labels, sharing, transfers and batch actions.
 
 import {
-  state, h, icon, iconButton, api, toast, go, confirmDialog, confirmDelete,
+  state, h, icon, iconButton, api, toast, toastError, go, confirmDialog, confirmDelete,
   siteAvatar, userAvatar, credTitle, credAccount, credBrief, fmtDateTime,
   emptyState, loading, field, lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
@@ -370,10 +370,8 @@ async function unshareOne(c, user) {
   if (res) toast(`已撤销对 ${user.username} 的共享`);
 }
 
-// removeCred deletes a passkey the user owns or leaves one shared with them;
-// both are DELETE /credentials/{id}.
-async function removeCred(c, dialog, done) {
-  if (!(await confirmDelete(dialog, `/credentials/${encodeURIComponent(c.id)}`))) return;
+// forget drops a passkey the user no longer has and goes back to the list.
+function forget(c, done) {
   state.creds = state.creds.filter((x) => x.id !== c.id);
   sel.toggle(c.id, false);
   dropAdminCache();
@@ -381,24 +379,71 @@ async function removeCred(c, dialog, done) {
   go('#/passkeys');
 }
 
+async function deleteOwned(c) {
+  const n = shareCount(c);
+  const deleted = await confirmDelete({
+    title: '删除通行密钥？',
+    message: `删除后将无法再用它登录 ${c.rp_id} 上的账号“${credAccount(c)}”${n ? `，共享给的 ${n} 个人也会失去访问` : ''}。此操作无法撤销。`,
+    confirmText: '删除',
+  }, `/credentials/${encodeURIComponent(c.id)}`);
+  if (deleted) forget(c, '通行密钥已删除');
+}
+
+// leaveShared leaves a passkey shared with the user. It does not use
+// DELETE /credentials/{id}: had the passkey been transferred to the user
+// meanwhile, that would delete it for everyone.
+async function leaveShared(c) {
+  const ok = await confirmDialog({
+    title: '移除共享？',
+    message: `移除后你将无法再用它登录 ${c.rp_id} 上的账号“${credAccount(c)}”，除非 ${c.owner.username} 再次共享给你。`,
+    confirmText: '移除共享',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api('POST', '/credentials/leave', { ids: [c.id] });
+  } catch (err) {
+    // not_found: the passkey is no longer shared with the user.
+    if (err.items && err.items.some((item) => item.code === 'not_found')) {
+      toast('这条通行密钥的状态已变化', 'error');
+      await refresh();
+    } else {
+      toastError(err);
+    }
+    return;
+  }
+  forget(c, '已移除共享');
+}
+
 /* ------------------------------------------------------------------ */
 /* Detail                                                              */
 /* ------------------------------------------------------------------ */
 
-// siteURL only trusts http(s) origins, so a stored "javascript:" origin
-// can never become a clickable link.
+// siteURL is where "打开网站" goes. The origin of a shared passkey was
+// written by someone else, so it is only used when it is http(s) on the RP
+// ID or one of its subdomains; otherwise the link is https://<rp_id>. An RP
+// ID that is not a bare host name (say "github.com@evil.com") gets no link.
 function siteURL(c) {
+  let rp;
+  try {
+    rp = new URL('https://' + c.rp_id);
+  } catch {
+    return null;
+  }
+  if (rp.username || rp.password || rp.port || rp.pathname !== '/' || rp.search || rp.hash) return null;
   try {
     const u = new URL(c.origin);
-    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    if ((u.protocol === 'https:' || u.protocol === 'http:')
+      && (u.hostname === rp.hostname || u.hostname.endsWith('.' + rp.hostname))) return u.origin;
   } catch {
-    // Missing or unparsable origin: fall back to the RP ID.
+    // Missing or unparsable origin: use the RP ID.
   }
-  return 'https://' + c.rp_id;
+  return rp.origin;
 }
 
 function renderCredentialDetail(c) {
   const shared = isShared(c);
+  const url = siteURL(c);
   return h('div', { class: 'detail pk-detail' },
     backButton('我的通行密钥', '#/passkeys'),
     h('div', { class: 'detail-head' },
@@ -411,7 +456,7 @@ function renderCredentialDetail(c) {
       field('用户名', c.user_name, { actions: c.user_name ? [copyAction(c.user_name, '用户名')] : [] }),
       field('显示名', c.user_display_name),
       field('网站', c.rp_id, {
-        actions: [h('a', { class: 'icon-btn', href: siteURL(c), target: '_blank', rel: 'noopener noreferrer', title: '打开网站', 'aria-label': '打开网站' }, icon('external'))],
+        actions: url ? [h('a', { class: 'icon-btn', href: url, target: '_blank', rel: 'noopener noreferrer', title: '打开网站', 'aria-label': '打开网站' }, icon('external'))] : [],
       })),
     shared ? sharedWithMe(c) : [labelSection(c), sharesSection(c)],
     h('h3', { class: 'section-title' }, '使用情况'),
@@ -422,26 +467,10 @@ function renderCredentialDetail(c) {
     credentialTechInfo(c),
     shared
       ? h('div', { class: 'danger-zone' },
-        h('button', {
-          type: 'button',
-          class: 'btn btn-danger-outline',
-          onclick: () => removeCred(c, {
-            title: '移除共享？',
-            message: `移除后你将无法再用它登录 ${c.rp_id} 上的账号“${credAccount(c)}”，除非 ${c.owner.username} 再次共享给你。`,
-            confirmText: '移除共享',
-          }, '已移除共享'),
-        }, icon('x'), '移除共享'))
+        h('button', { type: 'button', class: 'btn btn-danger-outline', onclick: () => leaveShared(c) }, icon('x'), '移除共享'))
       : h('div', { class: 'danger-zone' },
         h('button', { type: 'button', class: 'btn', onclick: () => transferCreds([c]) }, icon('transfer'), '转移给…'),
-        h('button', {
-          type: 'button',
-          class: 'btn btn-danger-outline',
-          onclick: () => removeCred(c, {
-            title: '删除通行密钥？',
-            message: `删除后将无法再用它登录 ${c.rp_id} 上的账号“${credAccount(c)}”${shareCount(c) ? `，共享给的 ${shareCount(c)} 个人也会失去访问` : ''}。此操作无法撤销。`,
-            confirmText: '删除',
-          }, '通行密钥已删除'),
-        }, icon('trash'), '删除通行密钥')));
+        h('button', { type: 'button', class: 'btn btn-danger-outline', onclick: () => deleteOwned(c) }, icon('trash'), '删除通行密钥')));
 }
 
 // sharedWithMe is the read-only part of a passkey someone shared with the
