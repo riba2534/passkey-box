@@ -51,6 +51,13 @@ func (s *Store) migrate(ctx context.Context, path string, existed bool, now time
 	if version == SchemaVersion {
 		return m, nil
 	}
+	// Refuse a database the migrations cannot take before copying it: a
+	// restart loop would otherwise add a full copy on every attempt.
+	if version < 1 {
+		if err := checkUniqueCredentialIDs(ctx, s.db); err != nil {
+			return m, fmt.Errorf("migrate schema 0 to 1: %w", err)
+		}
+	}
 	if existed {
 		snapshot := snapshotPath(path, SchemaVersion, now)
 		if _, err := s.db.ExecContext(ctx, `VACUUM INTO `+sqlString(snapshot)); err != nil {
@@ -87,15 +94,24 @@ func snapshotPath(path string, version int, now time.Time) string {
 
 func sqlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
+// checkUniqueCredentialIDs reports a credential ID stored for more than one
+// user, which schema 0 allowed and schema 1 does not.
+func checkUniqueCredentialIDs(ctx context.Context, q queryer) error {
+	var dup string
+	err := q.QueryRowContext(ctx, `SELECT id FROM credentials GROUP BY id HAVING COUNT(*) > 1 LIMIT 1`).Scan(&dup)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("credential id %q is stored more than once; delete all but one of them before upgrading", dup)
+}
+
 // migrateV1 adds credential sharing, API tokens, the audit log and the user
 // status and note columns, and makes credential IDs unique across users.
 func migrateV1(ctx context.Context, tx *sql.Tx) error {
-	var dup string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM credentials GROUP BY id HAVING COUNT(*) > 1 LIMIT 1`).Scan(&dup)
-	if err == nil {
-		return fmt.Errorf("credential id %q is stored more than once; credential IDs must be unique before upgrading", dup)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if err := checkUniqueCredentialIDs(ctx, tx); err != nil {
 		return err
 	}
 	for _, stmt := range []string{

@@ -183,8 +183,13 @@ func TestMigrateRefusesDuplicateCredentialIDs(t *testing.T) {
 	writeV0Database(t, path, map[int64][]string{1: {"YQ", "c2FtZQ"}, 2: {"c2FtZQ"}})
 	before := dumpV0(t, openRaw(t, path))
 
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), `"c2FtZQ"`) {
-		t.Fatalf("Open = %v, want an error naming the duplicate ID", err)
+	for range 3 { // a restart loop
+		if _, err := Open(path); err == nil || !strings.Contains(err.Error(), `"c2FtZQ"`) {
+			t.Fatalf("Open = %v, want an error naming the duplicate ID", err)
+		}
+	}
+	if got := snapshots(t, dir); len(got) != 0 {
+		t.Fatalf("snapshots = %v; a database that cannot be migrated must not be copied", got)
 	}
 	db := openRaw(t, path)
 	if v := userVersion(t, db); v != 0 {
