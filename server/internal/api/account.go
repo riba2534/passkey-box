@@ -30,19 +30,12 @@ func validPassword(w http.ResponseWriter, password string) bool {
 	return true
 }
 
-// createUser validates the account fields and creates the user. It writes the
-// error response and returns false on failure.
-func (s *Server) createUser(w http.ResponseWriter, r *http.Request, username, password string, isAdmin bool) (store.User, bool) {
-	if !validUsername(w, username) || !validPassword(w, password) {
-		return store.User{}, false
-	}
-	user, err := s.opts.Store.CreateUser(r.Context(), username, password, isAdmin, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "username already exists")
-		return store.User{}, false
-	}
+// createUser creates the account on behalf of actor. It writes the error
+// response and returns false on failure.
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request, actor store.Actor, u store.NewUser) (store.User, bool) {
+	user, err := s.opts.Store.CreateUserAs(r.Context(), actor, u, s.opts.Now())
 	if err != nil {
-		s.internalError(w, err)
+		s.writeUserError(w, err)
 		return store.User{}, false
 	}
 	return user, true
@@ -96,7 +89,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	user, ok := s.createUser(w, r, req.Username, req.Password, false)
+	// Nobody is signed in yet, so the account is created by the system.
+	user, ok := s.createUser(w, r, store.SystemActor, store.NewUser{Username: req.Username, Password: req.Password})
 	if !ok {
 		return
 	}
@@ -136,8 +130,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, c 
 		s.internalError(w, err)
 		return
 	}
-	if err := s.opts.Store.SetPassword(r.Context(), user.ID, req.NewPassword); err != nil {
-		s.internalError(w, err)
+	if _, err := s.opts.Store.UpdateUser(r.Context(), c.actor(), user.ID, store.UserUpdate{Password: &req.NewPassword}, s.opts.Now()); err != nil {
+		s.writeUserError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

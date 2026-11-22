@@ -57,7 +57,7 @@ func TestEnsureAdmin(t *testing.T) {
 		if created, err := s.EnsureAdmin(ctx, "ADMIN", "other", t0); err != nil || created {
 			t.Fatalf("second EnsureAdmin = %v, %v", created, err)
 		}
-		users, _ := s.ListUsers(ctx)
+		users, _ := s.ListUsers(ctx, UserFilter{})
 		if len(users) != 1 {
 			t.Fatalf("users = %+v", users)
 		}
@@ -124,10 +124,10 @@ func TestDeleteUserCascades(t *testing.T) {
 	if err := s.CreateSession(ctx, "tok", u.ID, t0, t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUser(ctx, u.ID); err != nil {
+	if err := s.DeleteUser(ctx, SystemActor, u.ID, t0); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteUser(ctx, u.ID); !errors.Is(err, ErrNotFound) {
+	if err := s.DeleteUser(ctx, SystemActor, u.ID, t0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete = %v", err)
 	}
 	if _, err := s.SessionUser(ctx, "tok", t0); !errors.Is(err, ErrNotFound) {
@@ -148,7 +148,7 @@ func TestPasswordCacheFollowsPasswordChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetPassword(ctx, u.ID, "two"); err != nil {
+	if _, err := s.UpdateUser(ctx, SystemActor, u.ID, UserUpdate{Password: new("two")}, t0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Authenticate(ctx, "alice", "one"); !errors.Is(err, ErrBadPassword) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/riba2534/passkey-box/server/internal/api"
+	"github.com/riba2534/passkey-box/server/internal/store"
 )
 
 func TestBasicAuth(t *testing.T) {
@@ -198,7 +199,7 @@ func TestUsernameLength(t *testing.T) {
 
 func TestChangePassword(t *testing.T) {
 	e := newEnv(t)
-	e.createUser("alice", "old", false)
+	alice := e.createUser("alice", "old", false)
 	b := e.browser()
 	b.do("POST", "/api/v1/auth/login", map[string]string{"username": "alice", "password": "old"}).expect(http.StatusOK)
 
@@ -218,4 +219,44 @@ func TestChangePassword(t *testing.T) {
 	e.basic("alice", "new").do("GET", "/api/v1/me", nil).expect(http.StatusOK)
 	e.anon().do("PUT", "/api/v1/me/password", map[string]string{"old_password": "new", "new_password": "x"}).
 		expectError(http.StatusUnauthorized, "unauthorized")
+
+	// Only the successful change is recorded, with the user as the actor.
+	ev, err := e.store.ListAudit(t.Context(), store.AuditFilter{Action: "user.update", Limit: 10})
+	if err != nil || len(ev) != 1 || ev[0].Actor == nil || ev[0].Actor.ID != alice.ID || ev[0].Subject.ID != alice.ID ||
+		ev[0].Via != "basic" || string(ev[0].Detail) != `{"changes":{"password":true}}` {
+		t.Fatalf("events = %+v, %v", ev, err)
+	}
+}
+
+// User objects outside /admin/* carry the sharing statistics and status but
+// not the administrators' note.
+func TestUserViewsHideNote(t *testing.T) {
+	e := newEnv(t, func(o *api.Options) { o.AllowRegister = true })
+	alice := e.createUser("alice", "pw", false)
+	if _, err := e.store.UpdateUser(t.Context(), store.SystemActor, alice.ID, store.UserUpdate{Note: new("secret note")}, e.clock()); err != nil {
+		t.Fatal(err)
+	}
+	for name, r := range map[string]*response{
+		"me":       e.basic("alice", "pw").do("GET", "/api/v1/me", nil).expect(http.StatusOK),
+		"login":    e.anon().do("POST", "/api/v1/auth/login", map[string]string{"username": "alice", "password": "pw"}).expect(http.StatusOK),
+		"register": e.anon().do("POST", "/api/v1/auth/register", map[string]string{"username": "bob", "password": "pw"}).expect(http.StatusCreated),
+	} {
+		var body struct {
+			User map[string]any `json:"user"`
+		}
+		r.decode(&body)
+		if _, ok := body.User["note"]; ok {
+			t.Errorf("%s: user has a note: %s", name, r.body)
+		}
+		for _, key := range []string{"id", "username", "is_admin", "disabled", "created_at", "credential_count", "shared_in_count", "shared_out_count", "last_used_at"} {
+			if _, ok := body.User[key]; !ok {
+				t.Errorf("%s: user lacks %q: %s", name, key, r.body)
+			}
+		}
+	}
+	// Self-registration is recorded as done by the system.
+	ev, _ := e.store.ListAudit(t.Context(), store.AuditFilter{Action: "user.create", Limit: 1})
+	if len(ev) != 1 || ev[0].Subject.Username != "bob" || ev[0].Actor != nil || ev[0].Via != "system" {
+		t.Fatalf("events = %+v", ev)
+	}
 }
