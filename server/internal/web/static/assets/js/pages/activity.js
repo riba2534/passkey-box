@@ -82,7 +82,7 @@ function eventRow(e) {
   return h('li', { class: 'activity-item' },
     h('span', { class: 'activity-icon' }, icon(ICONS[e.action] || ICONS[e.action.split('.')[0]] || 'activity')),
     h('div', { class: 'item-main' },
-      h('div', { class: 'activity-text' }, eventText(e, state.me.id)),
+      h('div', { class: 'event-text' }, eventText(e, state.me.id)),
       h('div', { class: 'item-meta', title: via ? `${at} · ${via}` : at },
         h('time', { datetime: e.at }, at), via ? ' · ' + via : '')));
 }

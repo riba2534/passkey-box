@@ -18,16 +18,13 @@
 
 /* ---------- 我的通行密钥 ---------- */
 
-.pk-select-all { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
 .pk-tools { display: flex; align-items: center; gap: 2px; flex: none; }
-.pk-list-pane .selection-bar { margin-top: 10px; }
 .pk-list-pane .list-item { gap: 10px; }
 .pk-list-pane .list-item .select-box { margin-left: 2px; }
 
 .pk-detail .detail-subtitle .pk-rp { min-width: 0; overflow-wrap: anywhere; }
 .pk-detail .danger-zone { flex-wrap: wrap; gap: 8px; }
 .pk-note { margin: -12px 2px 20px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
-.pk-share-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
 .pk-share-note {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 10px 16px;
@@ -40,12 +37,13 @@
 /* ---------- 我的动态 ---------- */
 
 .activity-list { list-style: none; margin: 0 0 20px; padding: 0; }
-.activity-item {
+/* Rows with an icon in front: activity events and the Agent facts. */
+.activity-item, .agent-fact {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
-.activity-item:first-child { border-top: 0; }
+.activity-item:first-child, .agent-fact:first-child { border-top: 0; }
 .activity-icon {
   display: grid; place-items: center;
   width: 30px; height: 30px; flex: none;
@@ -53,18 +51,11 @@
   background: var(--primary-soft); color: var(--primary);
 }
 .activity-icon .icon { width: 16px; height: 16px; }
-.activity-text { color: var(--text); overflow-wrap: anywhere; }
 .activity-more { display: flex; justify-content: center; margin-bottom: 20px; }
 
 /* ---------- Agent 接入 ---------- */
 
 .agent-facts { list-style: none; margin: 0; padding: 0; }
-.agent-fact {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-}
-.agent-fact:first-child { border-top: 0; }
 .agent-fact .icon { color: var(--primary); margin-top: 1px; }
 .agent-prompt {
   margin: 6px 0;

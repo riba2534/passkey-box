@@ -3,8 +3,6 @@
 /* ---------- Lists ---------- */
 
 .list-title-actions { display: flex; gap: 6px; flex: none; }
-.select-all { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.list-header .selection-bar { margin-top: 10px; }
 .admin-page .list-item .select-box { margin-right: -2px; }
 .admin-page .list-item.is-disabled .avatar { filter: grayscale(1); opacity: .5; }
 .admin-page .list-item.is-disabled .item-title .text { color: var(--text-2); }
@@ -47,7 +45,6 @@ button.chip:hover { background: var(--bg-hover); }
 .section-link { margin: 0 2px 8px 0; padding: 0; border: 0; background: none; color: var(--primary); font-size: 12px; font-weight: 500; }
 .section-link:hover { text-decoration: underline; }
 .row-actions { display: flex; gap: 2px; flex: none; }
-.card-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
 .card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; border-top: 1px solid var(--border); }
 
 /* ---------- Dialogs ---------- */
@@ -95,7 +92,6 @@ button.stat:hover { border-color: var(--primary-soft-strong); background: #FBFDF
 
 .event-row { padding: 10px 16px; border-top: 1px solid var(--border); }
 .event-row:first-child { border-top: 0; }
-.event-text { color: var(--text); overflow-wrap: anywhere; }
 .event-meta { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; color: var(--text-3); font-size: 12px; }
 
 /* ---------- Responsive ---------- */

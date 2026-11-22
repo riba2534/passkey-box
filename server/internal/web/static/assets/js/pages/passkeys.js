@@ -125,7 +125,7 @@ function renderPasskeysPage() {
         refill();
       }),
       h('div', { class: 'list-tools' },
-        h('label', { class: 'pk-select-all' }, selectAll, countEl),
+        h('label', { class: 'select-all' }, selectAll, countEl),
         h('div', { class: 'pk-tools' }, filterSelect, sortSelect)),
       selectionBar(sel, [
         { text: '共享给…', icon: 'share', onclick: shareSelected },
@@ -485,7 +485,7 @@ function sharesSection(c) {
       h('h3', { class: 'section-title' }, shares.length ? `共享 · ${shares.length} 人` : '共享'),
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => shareCreds([c]) }, icon('user-plus'), '添加')),
     h('div', { class: 'card' },
-      shares.length ? shares.map(row) : h('div', { class: 'pk-share-empty' }, '还没有共享给任何人。'),
+      shares.length ? shares.map(row) : h('div', { class: 'card-empty' }, '还没有共享给任何人。'),
       h('div', { class: 'pk-share-note' }, icon('alert'), h('span', null, SHARE_WARNING))),
   ];
 }
