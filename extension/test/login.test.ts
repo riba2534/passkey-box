@@ -37,6 +37,11 @@ describe("verifyLogin", () => {
       ok: false,
       message: "用户名或密码错误",
     });
+    const disabled = fakeFetch(() => json(403, { error: { code: "account_disabled", message: "x" } }));
+    expect(await verifyLogin({ serverUrl: "http://h", username: "a", password: "b" }, disabled.fn)).toEqual({
+      ok: false,
+      message: "账户已被停用，请联系管理员",
+    });
     const down = fakeFetch(() => Promise.reject(new TypeError("Failed to fetch")));
     expect(await verifyLogin({ serverUrl: "127.0.0.1:18411", username: "a", password: "b" }, down.fn)).toEqual({
       ok: false,

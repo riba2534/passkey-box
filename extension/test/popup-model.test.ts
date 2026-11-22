@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Credential } from "../src/lib/api";
 import {
+  accountName,
   credentialTitle,
+  detailFields,
   formatTime,
   groupCredentials,
   matchesQuery,
+  removeAction,
   serverHost,
+  sharedLabel,
   siteUrl,
   tabHostname,
 } from "../src/lib/popup-model";
@@ -75,5 +79,53 @@ describe("popup model", () => {
     expect(formatTime("garbage")).toBe("garbage");
     const d = new Date(2026, 10, 20, 9, 5);
     expect(formatTime(d.toISOString())).toBe("2026-11-20 09:05");
+  });
+
+  it("subtitles name the account", () => {
+    expect(accountName(cred({ user_name: "alice", user_display_name: "Alice" }))).toBe("alice");
+    expect(accountName(cred({ user_name: "", user_display_name: "Alice" }))).toBe("Alice");
+    expect(accountName(cred({ user_name: "", user_display_name: "" }))).toBe("（无用户名）");
+  });
+});
+
+describe("popup model: passkeys shared by other users", () => {
+  const owner = { id: 1, username: "alice" };
+  const own = cred({ id: "own", owner, access: "owner", shared_at: null, last_used_at: "2026-11-21T00:00:00Z" });
+  const shared = cred({ id: "in", owner: { id: 2, username: "bob" }, access: "shared", shared_at: "2026-11-21T00:00:00Z" });
+  // Servers before 0.6.0 send none of owner, access and shared_at.
+  const legacy = cred({ id: "old", last_used_at: "2026-11-21T00:00:00Z" });
+
+  it("marks only shared passkeys with their owner", () => {
+    expect(sharedLabel(shared)).toBe("共享自 bob");
+    expect(sharedLabel(own)).toBeNull();
+    expect(sharedLabel(legacy)).toBeNull();
+  });
+
+  it("details of a shared passkey add its owner", () => {
+    expect(detailFields(shared)).toEqual([
+      ["网站", "example.com"],
+      ["用户名", "user"],
+      ["显示名", "—"],
+      ["所有者", "bob"],
+      ["创建时间", formatTime("2026-11-20T03:30:00Z")],
+      ["最近使用", "从未使用"],
+    ]);
+    expect(detailFields(own).map(([k]) => k)).toEqual(["网站", "用户名", "显示名", "创建时间", "最近使用"]);
+    expect(detailFields(legacy)).toEqual([
+      ["网站", "example.com"],
+      ["用户名", "user"],
+      ["显示名", "—"],
+      ["创建时间", formatTime("2026-11-20T03:30:00Z")],
+      ["最近使用", formatTime("2026-11-21T00:00:00Z")],
+    ]);
+  });
+
+  it("removing a shared passkey leaves the share; an own passkey is deleted as before", () => {
+    expect(removeAction(shared)).toEqual({ label: "移除共享", done: "已移除共享", failed: "移除共享失败" });
+    const deletion = { label: "删除", done: "已删除通行密钥", failed: "删除失败" };
+    expect(removeAction(own)).toEqual(deletion);
+    expect(removeAction(legacy)).toEqual(deletion);
+    // The server decides what DELETE does, even if it did not name the owner.
+    expect(removeAction(cred({ access: "shared" })).label).toBe("移除共享");
   });
 });

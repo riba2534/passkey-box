@@ -211,6 +211,36 @@ body.popup {
   color: var(--muted);
 }
 
+/* A long account name gives way to "共享自 <owner>"; a long owner name is cut short too. */
+.item-sub.shared {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.item-account,
+.item-owner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-owner {
+  flex: none;
+  max-width: 60%;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.item:hover .item-owner,
+.item:focus-visible .item-owner {
+  background: #fff;
+}
+
 .item-go {
   width: 16px;
   height: 16px;
