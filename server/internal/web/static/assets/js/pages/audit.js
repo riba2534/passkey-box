@@ -116,7 +116,7 @@ async function setFilters(patch) {
   state.audit = null;
   renderShell();
   await loadEvents();
-  if (state.me) renderShell();
+  renderShell();
 }
 
 /* ------------------------------------------------------------------ */

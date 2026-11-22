@@ -189,6 +189,9 @@ async function logout() {
 const SCROLLERS = [['.list-body', false], ['.detail-pane', true], ['.content', true]];
 
 function renderShell() {
+  // A page may redraw after an await during which the session ended; the
+  // login page is already showing then.
+  if (!state.me) return;
   const r = state.route;
   const samePage = $app.dataset.page === r.page;
   const sameItem = samePage && $app.dataset.id === r.id;

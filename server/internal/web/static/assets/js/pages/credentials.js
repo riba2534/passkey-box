@@ -142,7 +142,7 @@ async function setView(patch) {
   state.allCreds = null;
   renderShell();
   await loadList();
-  if (state.me) renderShell();
+  renderShell();
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,7 +345,7 @@ async function act(action, creds) {
   }
   sel.set(sel.ids().filter((id) => listed(id)));
   if (deleted) go('#/credentials');
-  else if (state.me) renderShell();
+  else renderShell();
 }
 
 function selected(ids) {
@@ -368,7 +368,7 @@ function renderPage(r) {
   // keeps the focus in the search box, unless the page was redrawn meanwhile.
   const update = () => {
     if (listBody.isConnected) fill();
-    else if (state.me) renderShell();
+    else renderShell();
   };
 
   const listPane = h('section', { class: 'list-pane', 'aria-label': '通行密钥列表' },
