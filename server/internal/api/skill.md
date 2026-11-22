@@ -1,6 +1,6 @@
 ---
 name: passkey-box
-description: 用户要在 Passkey Box（自托管通行密钥管理器）上查询、共享、转移或删除通行密钥，或者以管理员身份批量管理用户、交接离职人员的账号、查看操作日志时使用。
+description: 用户要在 Passkey Box（自托管通行密钥管理器）上查询、共享、转移或删除通行密钥，修改它们的名称、备注和自定义字段，或者以管理员身份批量管理用户、交接离职人员的账号、查看操作日志时使用。
 ---
 
 # Passkey Box API 使用说明
@@ -37,8 +37,9 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 
 - **用户**：登录 Passkey Box 的人。用户名大小写不敏感地唯一（`Alice` 和 `alice` 是同一个人）。用户可以是管理员（`is_admin`），可以被停用（`disabled`，停用后无论哪种方式都登录不了）。管理员可以给用户写备注（`note`）。
 - **通行密钥（credential，也叫凭据）**：某个用户在某个网站（`rp_id`，例如 `github.com`）上的一个账号（`user_name`，例如 `alice@example.com`）。`id` 是全站唯一的 base64url 字符串。
-- **主人（owner）**：每条通行密钥有且只有一个主人。只有主人和管理员能改备注、删除、共享、转移。
-- **共享（share）**：主人把通行密钥共享给其他用户。被共享人能看到它，扩展能用它登录网站；被共享人可以自己退出共享，但不能改备注、删除、再共享或转移。**共享就是把私钥交给对方的扩展，撤销共享只能阻止对方以后再拉取，不能保证对方没有留存。**
+- **名称与自定义字段**：网站名称（`rp_name`，列表标题）、用户名（`user_name`）、显示名（`user_display_name`）是注册时网站给的，只用于展示，可以修改。每条通行密钥还可以带最多 50 个**自定义字段**（`fields`），像 1Password 一样记录密码、恢复码、TOTP 密钥、网址等。字段的值对能看到这条通行密钥的所有人可见，包括被共享人、管理员和令牌。
+- **主人（owner）**：每条通行密钥有且只有一个主人。只有主人和管理员能改备注、名称和自定义字段，删除、共享、转移。
+- **共享（share）**：主人把通行密钥共享给其他用户。被共享人能看到它（包括自定义字段），扩展能用它登录网站；被共享人可以自己退出共享，但不能改备注、名称和字段，不能删除、再共享或转移。**共享就是把私钥交给对方的扩展，撤销共享只能阻止对方以后再拉取，不能保证对方没有留存。**
 - **转移（transfer）**：把通行密钥换给另一个主人，立即生效，不需要对方确认。原主人默认失去访问；`keep_access: true` 时原主人变为被共享人。其他人的共享保留；新主人原本是被共享人时，那条共享删除。
 - **管理员**：通过 `/api/v1/admin/*` 管理所有用户，并对任何人的任何通行密钥做以上所有操作。
 - **操作日志（audit）**：每个写操作都记录执行人（`actor`）、认证方式（`via`：`session`、`basic`、`token:<令牌名>` 或 `system`）、受影响的用户（`subject`）、另一方（`target`）和通行密钥。你用令牌做的每一步都会以 `token:<令牌名>` 记下来。登录、读操作不记录。
@@ -46,7 +47,7 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 ## 3. 安全守则（必须遵守）
 
 1. **先预览，再执行。** 转移、删除（通行密钥或用户）、停用用户、重置密码、撤销会话、撤销共享，以及所有批量写操作，先用 `"dry_run": true` 发一次，把预览结果（涉及哪些用户、哪些网站和账号、条目数、`warnings`）整理成人能看懂的清单交给用户确认。用户明确同意后，再用同一个请求体、`"dry_run": false` 执行。`POST /api/v1/admin/users/{user_id}/revoke-sessions` 和单个的 `DELETE` 接口没有 dry run，执行前先用 GET 接口查出对象并向用户确认。
-2. **永远不要试图获取、推断或输出私钥。** 不要索要用户的密码，不要尝试用 HTTP Basic 认证绕过令牌的限制，不要把令牌写进文件、代码仓库或日志，展示命令时用 `$PKB_TOKEN` 代替令牌。
+2. **永远不要试图获取、推断或输出私钥。** 不要索要用户的密码，不要尝试用 HTTP Basic 认证绕过令牌的限制，不要把令牌写进文件、代码仓库或日志，展示命令时用 `$PKB_TOKEN` 代替令牌。`password` 和 `totp` 类型字段的值同样是机密，只在用户明确要求时输出。
 3. **只读令牌只做查询。** `GET /api/v1/me` 返回 `auth.read_only: true` 时，只调用 GET 接口；用户要求写操作时，告诉他需要一个可写的令牌。
 4. **确认操作对象。** 用户名可能拼错或有歧义时，先用 `GET /api/v1/users` 或 `GET /api/v1/admin/users?q=` 查出准确的用户；要操作的通行密钥先用列表接口查出 `id`，不要猜测 ID。批量操作前确认范围，例如列表的 `total` 是否超过了一页。
 5. **共享和转移会交出私钥。** 执行前提醒用户：对方会拿到私钥，事后撤销也收不回来。
@@ -137,7 +138,7 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 | `GET /api/v1/credentials` | 参数 `rp_id`（大小写不敏感精确匹配）、`access`（`all` 默认、`owned`、`shared`） | `{"credentials": [Credential]}`：我拥有的和共享给我的，按创建时间倒序 |
 | `POST /api/v1/credentials` | Credential 的注册字段 | 扩展注册通行密钥时调用，Agent 不要使用 |
 | `GET /api/v1/credentials/{id}` | — | `{"credential": Credential}`；无权访问 404 |
-| `PATCH /api/v1/credentials/{id}` | `{"label": "工作号"}` | `{"credential": Credential}`；只有主人能改备注，被共享人 403 `forbidden` |
+| `PATCH /api/v1/credentials/{id}` | `{"label"?, "rp_name"?, "user_name"?, "user_display_name"?, "fields"?}`，至少带一个 | `{"credential": Credential}`。只写变化的项；`fields` **整体替换**字段列表（见第 6 节 Field 和第 7 节的例子）。名称去掉首尾空白后最多 1000 个字符，可以为空。只有主人能改，被共享人 403 `forbidden`。什么都没带或值不合法返回 400，`message` 说明原因，例如 `fields[3]: invalid TOTP secret` |
 | `POST /api/v1/credentials/{id}/use` | — | 扩展每次签名后调用，用于使用统计。Agent 不要调用 |
 | `DELETE /api/v1/credentials/{id}` | — | 204。主人调用时删除这条通行密钥（共享一并删除）；被共享人调用时只退出共享 |
 | `POST /api/v1/credentials/share` | `{"ids": […], "users": [ref…], "dry_run": false}` | 只能共享自己拥有的。结果每个（凭据, 用户）一条：`{"credential": CredentialBrief, "user": UserBrief, "status": "shared"或"unchanged", "warnings": []}`。对象是主人本人报 `invalid_request`；对象已停用时成功但带警告 `user is disabled` |
@@ -177,14 +178,14 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 |---|---|---|
 | `GET /api/v1/admin/credentials` | 参数见下 | `{"credentials": [Credential], "total": n, "limit": n, "offset": n}`，按创建时间倒序 |
 | `GET /api/v1/admin/credentials/{id}` | — | `{"credential": Credential}` |
-| `PATCH /api/v1/admin/credentials/{id}` | `{"label": "…"}` | `{"credential": Credential}` |
+| `PATCH /api/v1/admin/credentials/{id}` | 同 `PATCH /api/v1/credentials/{id}` | `{"credential": Credential}`，任何人的通行密钥 |
 | `DELETE /api/v1/admin/credentials/{id}` | — | 204 |
 | `POST /api/v1/admin/credentials/share` | 同 `POST /api/v1/credentials/share` | 可以共享任何人的通行密钥 |
 | `POST /api/v1/admin/credentials/unshare` | 同 `POST /api/v1/credentials/unshare` | 任何人的通行密钥 |
 | `POST /api/v1/admin/credentials/transfer` | 同 `POST /api/v1/credentials/transfer` | 任何人的通行密钥 |
 | `POST /api/v1/admin/credentials/batch-delete` | `{"ids": […], "dry_run": false}` | 结果 `status` 一律为 `deleted` |
 
-`GET /api/v1/admin/credentials` 的参数：`owner` / `owner_id`（主人的用户名 / ID）、`shared_with` / `shared_with_id`（共享给了这个用户）、`rp_id`（大小写不敏感精确匹配）、`q`（在 `rp_id`、`rp_name`、`user_name`、`user_display_name`、`label` 和主人用户名里做大小写不敏感的子串匹配）、`shared`（`true` 只看有共享的，`false` 只看没有共享的）、`limit`、`offset`。引用的用户不存在时返回空列表。
+`GET /api/v1/admin/credentials` 的参数：`owner` / `owner_id`（主人的用户名 / ID）、`shared_with` / `shared_with_id`（共享给了这个用户）、`rp_id`（大小写不敏感精确匹配）、`q`（在 `rp_id`、`rp_name`、`user_name`、`user_display_name`、`label`、自定义字段的 `label`（不含字段的值）和主人用户名里做大小写不敏感的子串匹配）、`shared`（`true` 只看有共享的，`false` 只看没有共享的）、`limit`、`offset`。引用的用户不存在时返回空列表。
 
 ## 6. 数据对象
 
@@ -205,8 +206,9 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 ```json
 {"id": "q3Jt7c2pYgS2b6l1vV2kQw", "rp_id": "github.com", "rp_name": "GitHub",
  "user_handle": "MTIzNDU2", "user_name": "alice@example.com", "user_display_name": "Alice",
- "alg": -7, "public_key": "MFkw…", "sign_count": 0, "label": "工作号", "origin": "https://github.com",
- "created_at": "2026-11-20T03:30:00Z", "last_used_at": null, "use_count": 0,
+ "alg": -7, "public_key": "MFkw…", "sign_count": 0, "label": "工作号",
+ "fields": [{"id": "Xk3pQ9aB", "label": "恢复码", "type": "password", "value": "abcd-efgh"}],
+ "origin": "https://github.com", "created_at": "2026-11-20T03:30:00Z", "last_used_at": null, "use_count": 0,
  "owner": {"id": 1, "username": "alice"}, "access": "owner", "shared_at": null,
  "shared_with": [{"user": {"id": 2, "username": "bob"}, "shared_at": "2026-11-21T08:00:00Z",
                   "shared_by": {"id": 1, "username": "alice"}, "last_used_at": null}]}
@@ -215,8 +217,18 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 - `owner` 总是有。`access` 是 `"owner"` 或 `"shared"`，相对于这份列表所属的用户（`/api/v1/credentials` 是你，`/api/v1/admin/users/{user_id}/credentials` 是该用户）；`/api/v1/admin/credentials` 和批量结果里没有 `access`。
 - `shared_at` 只在 `access` 为 `"shared"` 时有值。`shared_with` 列出共享给了谁，主人和管理员能看到，被共享人看不到。
 - 能访问一条通行密钥的人 = `owner` + `shared_with` 里的每个 `user`。
+- `fields` 总是数组（没有字段时为 `[]`），顺序就是用户排列的顺序。
 
-**CredentialBrief**（批量结果里）：`{"id", "rp_id", "user_name", "owner": UserBrief}`。
+**Field**（自定义字段）：`{"id": "Xk3pQ9aB", "label": "恢复码", "type": "password", "value": "abcd-efgh"}`
+
+- `id` 由服务端分配（8 个字符）。修改时带回已有字段的 `id` 保持它的身份；新字段不带 `id`。
+- `label` 去掉首尾空白后最多 100 个字符，可以为空。
+- `type` 是 `text`、`password`、`url`、`email`、`phone`、`date`、`multiline`、`totp` 之一。
+- `value` 最多 10000 个字符。`date` 为空或 `YYYY-MM-DD`；`totp` 是 base32 密钥（如 `JBSWY3DPEHPK3PXP`，不区分大小写，空格和 `-` 会被忽略）或 `otpauth://totp/…?secret=…` 链接（可带 `issuer`、`algorithm`=`SHA1`/`SHA256`/`SHA512`、`digits`=6–8、`period`=1–300）。服务端不计算验证码。
+- 每次 PATCH 最多 50 个字段，label 最多 100 个字符，value 最多 10000 个字符；备注（`label`）和三个名称最多 1000 个字符。`url`、`email`、`phone` 不能含控制字符，其中的 Unicode 双向格式字符保存时会被去掉。
+- PATCH 凭据的请求体最大 8 MiB，其他接口 1 MiB，超过返回 413。
+
+**CredentialBrief**（批量结果里，不带 `fields`）：`{"id", "rp_id", "user_name", "owner": UserBrief}`。
 
 **Token**：`{"id": 3, "name": "claude", "prefix": "pkb_AbCdEfGh", "read_only": false, "created_at": "…", "expires_at": null, "last_used_at": null}`。
 
@@ -238,7 +250,7 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 | `user.delete` | 被删除的用户 | 交接对象或 `null` | `{"credentials_deleted": n, "credentials_transferred": n}` |
 | `user.revoke_sessions` | 用户 | — | `{"sessions": n, "tokens": n}` |
 | `credential.create` | 主人 | — | `{}` |
-| `credential.update` | 主人 | — | `{"label": {"from", "to"}}` |
+| `credential.update` | 主人 | — | 只列变化的项：`label`、`rp_name`、`user_name`、`user_display_name` 为 `{"from", "to"}`；`fields` 为 `{"added", "removed", "changed"}`，各是字段 label 的数组，不记字段的值 |
 | `credential.delete` | 主人 | — | `{}` |
 | `credential.share` | 主人 | 被共享人 | `{}` |
 | `credential.unshare` | 主人 | 被共享人 | `{}` |
@@ -301,6 +313,23 @@ curl -sS -X POST "$PKB_URL/api/v1/admin/users/batch-delete" -H "$AUTH" -H "$JSON
 ```
 
 只想暂时禁止访问、保留账户时，用 batch-update 的 `"disabled": true`。
+
+### 修改名称和自定义字段
+
+`PATCH` 没有 dry run，并且 `fields` 是整体替换：请求里没带上的已有字段会被删除。先取出现有字段，在它的基础上修改，发之前把改动告诉用户。
+
+```bash
+ID=q3Jt7c2pYgS2b6l1vV2kQw
+# 1. 看现有的名称和字段
+curl -sS "$PKB_URL/api/v1/credentials/$ID" -H "$AUTH" | jq '.credential | {rp_name, user_name, user_display_name, label, fields}'
+# 2. 改网站名称，并在现有字段后面加一个 TOTP 字段（已有字段原样带上，包括 id）
+FIELDS=$(curl -sS "$PKB_URL/api/v1/credentials/$ID" -H "$AUTH" \
+  | jq -c '.credential.fields + [{"label": "两步验证", "type": "totp", "value": "otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"}]')
+curl -sS -X PATCH "$PKB_URL/api/v1/credentials/$ID" -H "$AUTH" -H "$JSON" \
+  -d "{\"rp_name\": \"GitHub（公司）\", \"fields\": $FIELDS}" | jq '.credential | {rp_name, fields}'
+```
+
+只改名称或备注时不要带 `fields`。返回 400 时 `message` 指出哪个字段不合法（`fields[1]: …`，下标从 0 开始）。管理员修改别人的通行密钥时，把两个路径都换成 `/api/v1/admin/credentials/$ID`。在网站上重新注册同一账号时，改过的名称、备注和字段会保留。
 
 ### 盘点谁能访问某个账号
 

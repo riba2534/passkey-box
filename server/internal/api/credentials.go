@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/riba2534/passkey-box/server/internal/store"
 )
@@ -60,6 +62,8 @@ func (c *credentialRequest) validate() string {
 		return "sign_count must not be negative"
 	case c.Origin != "" && !isHTTPURL(c.Origin):
 		return "origin must be an http or https URL"
+	case utf8.RuneCountInString(c.Label) > store.MaxCredentialNameLen:
+		return fmt.Sprintf("label must be at most %d characters", store.MaxCredentialNameLen)
 	}
 	return ""
 }
@@ -142,28 +146,29 @@ func (s *Server) handleGetCredential(w http.ResponseWriter, r *http.Request, c *
 	writeJSON(w, http.StatusOK, map[string]any{"credential": newAccessCredentialView(cred, c.privateKeys(), false)})
 }
 
-// readLabel reads a {"label": "…"} request body. On failure it answers 400
-// and returns false.
-func readLabel(w http.ResponseWriter, r *http.Request) (string, bool) {
+// readCredentialUpdate reads the body of PATCH /credentials/{id} and
+// /admin/credentials/{id}, where every member is optional; the store checks
+// the values. On failure it answers 400 and returns false.
+func readCredentialUpdate(w http.ResponseWriter, r *http.Request) (store.CredentialUpdate, bool) {
 	var req struct {
-		Label *string `json:"label"`
+		Label           *string        `json:"label"`
+		RPName          *string        `json:"rp_name"`
+		UserName        *string        `json:"user_name"`
+		UserDisplayName *string        `json:"user_display_name"`
+		Fields          *[]store.Field `json:"fields"`
 	}
-	if !readJSON(w, r, &req) {
-		return "", false
+	if !readJSONLimit(w, r, &req, maxCredentialUpdateBytes) {
+		return store.CredentialUpdate{}, false
 	}
-	if req.Label == nil {
-		badRequest(w, "label is required")
-		return "", false
-	}
-	return *req.Label, true
+	return store.CredentialUpdate(req), true
 }
 
 func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
-	label, ok := readLabel(w, r)
+	u, ok := readCredentialUpdate(w, r)
 	if !ok {
 		return
 	}
-	cred, err := s.opts.Store.SetCredentialLabel(r.Context(), c.actor(), c.User.ID, r.PathValue("id"), label, s.opts.Now())
+	cred, err := s.opts.Store.UpdateCredential(r.Context(), c.actor(), c.User.ID, r.PathValue("id"), u, s.opts.Now())
 	if err != nil {
 		s.writeStoreError(w, err, credentialNotFound)
 		return

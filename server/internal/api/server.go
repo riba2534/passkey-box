@@ -3,9 +3,12 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -20,8 +23,12 @@ const (
 	sessionCookie   = "pkb_session"
 	sessionLifetime = 30 * 24 * time.Hour
 	maxBodyBytes    = 1 << 20
-	extensionPath   = "/downloads/passkey-box-extension.zip"
-	extensionName   = "passkey-box-extension.zip"
+	// maxCredentialUpdateBytes fits the largest valid credential update: 50
+	// fields of 10000 characters each, even with every character JSON-escaped
+	// as a surrogate pair (12 bytes). Only the PATCH endpoints accept it.
+	maxCredentialUpdateBytes = 8 << 20
+	extensionPath            = "/downloads/passkey-box-extension.zip"
+	extensionName            = "passkey-box-extension.zip"
 )
 
 // Options configures a Server.
@@ -232,7 +239,25 @@ func (s *Server) handleExtensionDownload(w http.ResponseWriter, r *http.Request)
 // readJSON reads a single JSON value from the request body into v. On failure
 // it answers 400 and returns false.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes))
+	return readJSONLimit(w, r, v, maxBodyBytes)
+}
+
+// readJSONLimit is readJSON with a body of at most limit bytes; a larger body
+// answers 413.
+func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	// Read the whole body first: a body over the limit is 413 even when it
+	// starts with a complete JSON value.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "invalid_request", fmt.Sprintf("request body exceeds %d bytes", limit))
+		return false
+	}
+	if err != nil {
+		badRequest(w, "invalid JSON body")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	if dec.Decode(v) != nil || dec.More() {
 		badRequest(w, "invalid JSON body")
 		return false

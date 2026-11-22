@@ -2,7 +2,8 @@
 
 /* ---------- Shared ---------- */
 
-/* A section title with a button on the right. */
+/* A section title with a button on the right; sectionHead in components.js
+   uses it on the admin pages too. */
 .user-section-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: 0 0 8px;

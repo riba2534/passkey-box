@@ -1,6 +1,6 @@
 // Toolbar popup: login when unconfigured, otherwise a 1Password-style passkey list.
 
-import { describeError, ServerClient, type Credential } from "./lib/api";
+import { describeError, ServerClient, type Credential, type Field } from "./lib/api";
 import { CONFIG_KEY, type Config, type Settings } from "./lib/config";
 import { verifyLogin } from "./lib/login";
 import { MANAGED_KEY, type ManagedPolicy } from "./lib/managed";
@@ -8,6 +8,10 @@ import {
   accountName,
   credentialTitle,
   detailFields,
+  fieldLabel,
+  fieldLink,
+  fieldText,
+  groupCode,
   groupCredentials,
   removeAction,
   serverHost,
@@ -16,6 +20,7 @@ import {
   tabHostname,
 } from "./lib/popup-model";
 import { clearConfig, loadConfig, loadPolicy, loadSettings, saveConfig, saveSettings } from "./lib/storage";
+import { parseTotp, totp } from "./lib/totp";
 import { avatar } from "./ui/avatar";
 import { button, h, icon } from "./ui/dom";
 import { loginForm, settingsPanel } from "./ui/forms";
@@ -30,6 +35,82 @@ function flash(text: string): void {
   setTimeout(() => el.remove(), 1600);
 }
 
+function copy(text: string, done: string): void {
+  void navigator.clipboard.writeText(text).then(
+    () => flash(done),
+    () => flash("复制失败"),
+  );
+}
+
+// A detail view refreshes its one-time codes every second until another view replaces it, which calls
+// leaveView() first. Closing the popup ends its page and the timer with it.
+let stopTimer = (): void => undefined;
+
+function leaveView(): void {
+  stopTimer();
+  stopTimer = () => undefined;
+}
+
+/** Calls `tick` now and then at the start of every second, until the returned function is called. */
+function everySecond(tick: (now: number) => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = () => {
+    const now = Date.now();
+    tick(now);
+    timer = setTimeout(run, 1000 - (now % 1000));
+  };
+  run();
+  return () => clearTimeout(timer);
+}
+
+/** A custom field's row: label, value and buttons. A TOTP field adds the update of its code to `ticks`. */
+function fieldRow(f: Field, ticks: Array<(now: number) => void>): HTMLElement {
+  const label = fieldLabel(f);
+  const value = h(document, "span", { class: "field-value" }, fieldText(f));
+  const actions = h(document, "span", { class: "field-actions" });
+  if (f.type === "totp") {
+    const params = parseTotp(f.value);
+    if (!params) {
+      value.textContent = "无法识别的密钥";
+    } else {
+      let code = "";
+      const remaining = h(document, "span", { class: "totp-remaining" });
+      const copyCode = button(document, "复制", "ghost", () => copy(code, "已复制验证码"));
+      copyCode.disabled = true;
+      value.classList.add("totp-code");
+      actions.append(remaining, copyCode);
+      ticks.push((now) => {
+        void totp(params, now).then((next) => {
+          code = next.code;
+          value.textContent = groupCode(next.code);
+          remaining.textContent = `${next.remaining} 秒`;
+          copyCode.disabled = false;
+        });
+      });
+    }
+  } else if (f.value) {
+    if (f.type === "password") {
+      let revealed = false;
+      const toggle = button(document, "显示", "ghost", () => {
+        revealed = !revealed;
+        value.textContent = fieldText(f, revealed);
+        toggle.textContent = revealed ? "隐藏" : "显示";
+      });
+      actions.append(toggle);
+    }
+    const link = fieldLink(f);
+    if (link) actions.append(button(document, "打开", "ghost", () => void chrome.tabs.create({ url: link })));
+    actions.append(button(document, "复制", "ghost", () => copy(f.value, `已复制${label}`)));
+  }
+  return h(
+    document,
+    "div",
+    { class: "field-row", "data-field-type": f.type },
+    h(document, "dt", {}, label),
+    h(document, "dd", {}, value, actions),
+  );
+}
+
 async function activeTabHostname(): Promise<string> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -42,6 +123,7 @@ async function activeTabHostname(): Promise<string> {
 // ---------------------------------------------------------------- login
 
 function renderLogin(): void {
+  leaveView();
   app.replaceChildren(
     h(document, "header", { class: "topbar" }, logo(document, "topbar-logo", LOGO_FILE), h(document, "span", { class: "topbar-title" }, "Passkey Box")),
     h(
@@ -177,6 +259,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
   }
 
   function showList(): void {
+    leaveView();
     topbar.hidden = false;
     if (state.error) {
       const retry = button(document, "重试", "secondary", () => void refresh());
@@ -216,6 +299,7 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
   }
 
   function showDetail(c: Credential): void {
+    leaveView();
     topbar.hidden = true;
     const title = credentialTitle(c);
     const status = h(document, "p", { class: "state-error", role: "alert", hidden: "" });
@@ -235,6 +319,9 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
         }
       })();
     });
+    // Servers before 0.7.0 send no fields.
+    const extra = c.fields ?? [];
+    const ticks: Array<(now: number) => void> = [];
     view.replaceChildren(
       backBar(""),
       h(
@@ -250,24 +337,22 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
         { class: "fields" },
         ...detailFields(c).map(([k, v]) => h(document, "div", { class: "field-row" }, h(document, "dt", {}, k), h(document, "dd", {}, v))),
       ),
+      ...(extra.length ? [h(document, "dl", { class: "fields custom-fields" }, ...extra.map((f) => fieldRow(f, ticks)))] : []),
       h(
         document,
         "div",
         { class: "detail-actions" },
-        button(document, "复制用户名", "secondary", () => {
-          void navigator.clipboard.writeText(c.user_name).then(
-            () => flash("已复制用户名"),
-            () => flash("复制失败"),
-          );
-        }),
+        button(document, "复制用户名", "secondary", () => copy(c.user_name, "已复制用户名")),
         siteUrl(c) ? button(document, "打开网站", "secondary", () => void chrome.tabs.create({ url: siteUrl(c) })) : null,
         del,
       ),
       status,
     );
+    if (ticks.length) stopTimer = everySecond((now) => ticks.forEach((tick) => tick(now)));
   }
 
   function showSettings(): void {
+    leaveView();
     topbar.hidden = true;
     view.replaceChildren(
       backBar("设置"),

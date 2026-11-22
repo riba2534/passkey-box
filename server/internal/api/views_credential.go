@@ -5,6 +5,8 @@ import "github.com/riba2534/passkey-box/server/internal/store"
 // credentialView is a Credential. PrivateKey is only set for HTTP Basic
 // callers of the user credential endpoints (see caller.privateKeys) and is
 // omitted otherwise; SharedWith is omitted where share recipients look.
+// Fields is always a list (the store never loads nil), shown in full to
+// everyone who sees the credential.
 type credentialView struct {
 	ID              string        `json:"id"`
 	RPID            string        `json:"rp_id"`
@@ -17,6 +19,7 @@ type credentialView struct {
 	PublicKey       string        `json:"public_key"`
 	SignCount       int64         `json:"sign_count"`
 	Label           string        `json:"label"`
+	Fields          []store.Field `json:"fields"`
 	Origin          string        `json:"origin"`
 	CreatedAt       string        `json:"created_at"`
 	LastUsedAt      *string       `json:"last_used_at"`
@@ -54,6 +57,7 @@ func newCredentialView(c store.Credential, privateKey, sharedWith bool) credenti
 		PublicKey:       c.PublicKey,
 		SignCount:       c.SignCount,
 		Label:           c.Label,
+		Fields:          c.Fields,
 		Origin:          c.Origin,
 		CreatedAt:       formatTime(c.CreatedAt),
 		LastUsedAt:      formatTimePtr(c.LastUsedAt),

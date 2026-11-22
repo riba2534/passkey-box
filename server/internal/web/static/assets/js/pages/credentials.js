@@ -5,11 +5,11 @@
 import {
   state, h, icon, iconButton, api, errText, toast, toastError, renderShell, go, chooseDialog, formDialog,
   siteAvatar, userAvatar, credTitle, credAccount, credBrief, fmtDate, fmtDateTime,
-  emptyState, loading, field, lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
+  emptyState, loading, field, lastUsedShort, lastUsedField, backButton, searchBox,
 } from '../core.js';
 import {
   pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges, filterChip, filterSelect,
-  labelBadge, labelEditor, credentialTechInfo,
+  labelBadge, labelEditor, credentialTechInfo, credentialNames, credentialFields,
 } from '../components.js';
 import { showAudit } from './audit.js';
 
@@ -448,6 +448,7 @@ function renderDetail(id) {
         h('button', { type: 'button', class: 'btn btn-sm', onclick: () => showAudit({ credentialId: id }) }, icon('clipboard'), '查看它的操作日志')));
   }
   const shares = c.shared_with || [];
+  const save = (patch) => patchCred(c, patch);
 
   return h('div', { class: 'detail' },
     back,
@@ -460,12 +461,11 @@ function renderDetail(id) {
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => act(transferCreds, [c]) }, icon('transfer'), '转移'),
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => act(shareCreds, [c]) }, icon('share'), '共享'),
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => showAudit({ credentialId: c.id }) }, icon('clipboard'), '操作日志')),
-    h('div', { class: 'card' },
-      field('主人', h('a', { href: '#/users/' + c.owner.id }, c.owner.username)),
-      field('网站', c.rp_id),
-      field('网站名称', c.rp_name),
-      field('用户名', c.user_name, { actions: c.user_name ? [copyAction(c.user_name, '用户名')] : [] }),
-      field('显示名', c.user_display_name)),
+    credentialNames(c, {
+      save,
+      before: [field('主人', h('a', { href: '#/users/' + c.owner.id }, c.owner.username)), field('网站', c.rp_id)],
+    }),
+    credentialFields(c, { save }),
     h('h3', { class: 'section-title' }, '备注'),
     labelCard(c),
     h('h3', { class: 'section-title' }, `共享 · ${shares.length}`),
@@ -492,13 +492,18 @@ function renderDetail(id) {
       h('button', { type: 'button', class: 'btn btn-danger-outline', onclick: () => act(deleteCreds, [c]) }, icon('trash'), '删除通行密钥')));
 }
 
+// patchCred changes anyone's passkey (its label, names or fields) and
+// keeps the returned passkey for the detail and the list.
+async function patchCred(c, body) {
+  const data = await api('PATCH', `/admin/credentials/${encodeURIComponent(c.id)}`, body);
+  details.set(c.id, data.credential);
+  const items = state.allCreds && state.allCreds.items;
+  const i = items ? items.findIndex((x) => x.id === c.id) : -1;
+  if (i >= 0) items[i] = data.credential;
+  // 我的通行密钥 shows it too when the admin owns it or it is shared with them.
+  if (c.owner.id === state.me.id || (c.shared_with || []).some((s) => s.user.id === state.me.id)) state.creds = null;
+}
+
 function labelCard(c) {
-  return labelEditor(c, async (label) => {
-    const data = await api('PATCH', `/admin/credentials/${encodeURIComponent(c.id)}`, { label });
-    details.set(c.id, data.credential);
-    const items = state.allCreds && state.allCreds.items;
-    const i = items ? items.findIndex((x) => x.id === c.id) : -1;
-    if (i >= 0) items[i] = data.credential;
-    if (c.owner.id === state.me.id) state.creds = null;
-  }, '主人和被共享的人都能看到这条备注。');
+  return labelEditor(c, (label) => patchCred(c, { label }), '主人和被共享的人都能看到这条备注。');
 }

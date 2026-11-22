@@ -47,6 +47,7 @@
 
   `field` 是出错的请求字段，`index` 是它在数组里的下标（`to` 这类单值字段为 0），`value` 是请求里的原值，`code` 与单个接口的错误码含义相同。数组里的重复条目报 `invalid_request`（`duplicate item`）。请求体本身不合法（JSON 错误、缺字段、数组为空或超过上限）时返回不带 `items` 的普通 400。
 - **`dry_run`**：请求带 `"dry_run": true` 时完整执行校验和计算，返回与真实执行相同形状的结果，然后回滚，不落库、不写操作日志。响应带 `"dry_run": true|false`。破坏性操作建议先 dry run 再执行。
+- **请求体**最大 1 MiB；`PATCH /credentials/{id}` 和 `PATCH /admin/credentials/{id}` 最大 8 MiB（够放最大的字段列表，即使所有字符都被转义）。超过返回 413 `invalid_request`。
 - **上限**：`ids` 最多 1000 个；共享、撤销共享的 `users` 最多 100 个，凭据数 × 用户数最多 10000；`batch-create` 最多 200 个用户；`batch-update` 最多 1000 条。
 - 每个条目结果里的 `warnings` 总是数组，没有警告时为 `[]`。
 
@@ -113,6 +114,9 @@
   "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...",
   "sign_count": 0,
   "label": "",
+  "fields": [
+    {"id": "Xk3pQ9aB", "label": "恢复码", "type": "password", "value": "abcd-efgh"}
+  ],
   "origin": "https://github.com",
   "created_at": "2026-11-20T03:30:00Z",
   "last_used_at": null,
@@ -131,14 +135,15 @@
 |---|---|
 | `id` | 凭据 ID（base64url），全站唯一 |
 | `rp_id` | 依赖方 ID，即注册时生效的 rpId（如 `github.com`） |
-| `rp_name` | 注册时网站给的 `rp.name`，可为空字符串 |
+| `rp_name` | 网站名称：注册时网站给的 `rp.name`，可为空字符串。主人和管理员可以修改 |
 | `user_handle` | 注册时网站给的 `user.id`（base64url），登录时原样返回给网站 |
-| `user_name` / `user_display_name` | 注册时网站给的 `user.name` / `user.displayName` |
+| `user_name` / `user_display_name` | 用户名 / 显示名：注册时网站给的 `user.name` / `user.displayName`。主人和管理员可以修改；这三个名称只用于展示，不参与签名 |
 | `alg` | COSE 算法：`-7`（ES256）或 `-257`（RS256） |
 | `private_key` | PKCS#8 DER 私钥（base64url），明文保存。**只在 HTTP Basic 认证下的 `GET /credentials`、`GET /credentials/{id}`、`POST /credentials`、`PATCH /credentials/{id}` 里出现**，其他情况省略这个字段 |
 | `public_key` | SPKI DER 公钥（base64url） |
 | `sign_count` | 签名计数，扩展固定写 0 |
 | `label` | 主人的备注，默认空字符串 |
+| `fields` | 自定义字段（[Field](#field)）的数组，按主人排列的顺序，没有时为 `[]`。凭据出现的地方都带它，被共享人、管理员和 API 令牌看到的值也不做隐藏 |
 | `origin` | 注册时页面的 origin，仅供展示 |
 | `use_count` / `last_used_at` | 使用统计（所有能用它的人合计），由 `POST .../use` 更新 |
 | `owner` | 主人 |
@@ -146,9 +151,33 @@
 | `shared_at` | `access` 为 `"shared"` 时是共享给该用户的时间，否则为 `null`；没有 `access` 时省略 |
 | `shared_with` | 共享给了谁，按时间升序。主人和管理员能看到，被共享人看不到（省略字段）。`shared_by` 是执行共享的人，已删除时为 `null`；`last_used_at` 是该用户最近一次使用 |
 
+### Field
+
+凭据的一个自定义字段：
+
+```json
+{"id": "Xk3pQ9aB", "label": "恢复码", "type": "password", "value": "abcd-efgh"}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 服务端分配：6 个随机字节的 base64url，8 个字符。修改时带回已有字段的 `id` 以保持它的身份；没带、格式不对（不匹配 `^[A-Za-z0-9_-]{1,32}$`）或在同一个请求里重复的，一律当作新字段分配新 `id`，不报错 |
+| `label` | 去掉首尾空白后 0–100 个字符，可以为空（界面显示类型名） |
+| `type` | `text`、`password`、`url`、`email`、`phone`、`date`、`multiline`、`totp` 之一 |
+| `value` | 0–10000 个字符。`date` 为空或 `YYYY-MM-DD` 格式的合法日期，`totp` 见下，其他类型不检查格式。`url`、`email`、`phone` 不能含控制字符；其中的 Unicode 双向格式字符（U+061C、U+200E、U+200F、U+202A–U+202E、U+2066–U+2069，复制来的电话号码里常见）保存时自动去掉，避免链接显示的文字和实际打开的地址不一致。`date` 和 `totp` 的值去掉首尾空白后保存，其他类型原样保存（除上面去掉的字符） |
+
+每次 `PATCH` 最多 50 个字段。重新注册时合并几条凭据的字段可能超过 50 个，读取不受影响，但要先删到 50 个以内才能再次修改字段。
+
+`totp` 的值是下面两种之一（去掉首尾空白后）：
+
+1. **base32 密钥**，例如 `JBSWY3DPEHPK3PXP`：删掉其中的 ASCII 空白（空格、`\t`、`\n`、`\r`、`\f`、`\v`）和 `-`，不区分大小写（只认 ASCII 字母；其他空白字符，例如 U+0085、U+00A0、U+FEFF，都算非法字符）；只能在末尾带 `=`（数量不限），其他位置出现 `=` 不合法；剩下的只能是 `A–Z` 和 `2–7`，长度除以 8 的余数不能是 1、3 或 6；至少解出 1 个字节。
+2. **otpauth 链接**：`otpauth://totp/<label>?secret=<base32>[&issuer=…][&algorithm=SHA1|SHA256|SHA512][&digits=6|7|8][&period=1..300]`。`secret` 必填，按上面的规则校验；`algorithm` 默认 `SHA1`，`digits` 默认 6，`period` 默认 30（秒）。scheme、`totp`、参数名和 `algorithm` 的值不区分大小写；可选参数为空值时视为没有；同一参数出现多次时取第一次；其他参数忽略。
+
+服务端只校验和保存，不计算验证码。Web 后台和扩展按 RFC 6238 计算：`T = floor(Unix 秒 / period)`，用 HMAC-`algorithm` 和 RFC 4226 的动态截断取 `digits` 位，左侧补 0。
+
 ### CredentialBrief
 
-`{"id": "…", "rp_id": "github.com", "user_name": "alice@example.com", "owner": {"id": 1, "username": "alice"}}`，用于批量结果。
+`{"id": "…", "rp_id": "github.com", "user_name": "alice@example.com", "owner": {"id": 1, "username": "alice"}}`，用于批量结果，不带 `fields`。
 
 ### Token
 
@@ -188,7 +217,7 @@
 | `user.delete` | 被删除的用户 | 交接对象或 `null` | `{"credentials_deleted": n, "credentials_transferred": n}` |
 | `user.revoke_sessions` | 用户 | — | `{"sessions": n, "tokens": n}` |
 | `credential.create` | 主人 | — | `{}` |
-| `credential.update` | 主人 | — | `{"label": {"from", "to"}}` |
+| `credential.update` | 主人 | — | 只列实际变化的项：`label`、`rp_name`、`user_name`、`user_display_name` 为 `{"from", "to"}`；`fields` 为 `{"added": [label…], "removed": [label…], "changed": [label…]}` |
 | `credential.delete` | 主人 | — | `{}` |
 | `credential.share` | 主人 | 被共享人 | `{}` |
 | `credential.unshare` | 主人 | 被共享人 | `{}` |
@@ -196,14 +225,16 @@
 | `credential.transfer` | 原主人 | 新主人 | `{"keep_access": bool}` |
 | `token.create` / `token.revoke` | 令牌主人 | — | `{"name": "…", "read_only": bool}` |
 
+`credential.update` 的 `fields` 按 `id` 比较新旧字段：新出现的算 added，不见了的算 removed，`id` 相同但 `label`、`type` 或 `value` 变了的算 changed（记新的 label）。**只记 label，不记字段的值**；只调整了顺序时三个数组都为空。事件的 `credential.user_name` 是修改前的用户名。
+
 登录、`/use` 和读操作不记录。
 
 ## 共享与转移
 
-- 每条凭据有唯一的**主人**。主人可以把凭据**共享**给本站其他用户：被共享人在 `GET /credentials` 里能看到它，扩展可以用它登录网站，被共享人也可以自己退出共享；但只有主人能改备注、删除、再共享或转移。
+- 每条凭据有唯一的**主人**。主人可以把凭据**共享**给本站其他用户：被共享人在 `GET /credentials` 里能看到它（包括自定义字段的值），扩展可以用它登录网站，被共享人也可以自己退出共享；但只有主人能改备注、名称和自定义字段，删除、再共享或转移。
 - **共享就是把私钥交给对方的扩展**。撤销共享只能阻止对方以后再拉取，不能保证对方没有留存。
 - **转移**把凭据换给另一个主人，立即生效，不需要对方确认。原主人默认失去访问；`keep_access: true` 时原主人变为被共享人。其他人的共享保留；新主人原本是被共享人时，那条共享删除。新主人已经有同一网站同一账号（`rp_id` 大小写不敏感、`user_handle` 相同）的凭据时，结果带警告，两条凭据并存。
-- 主人重新注册同一网站的同一账号时，旧凭据连同它的共享一起被替换：新的私钥在主人再次共享之前不会给任何人。
+- 主人重新注册同一网站的同一账号时，旧凭据连同它的共享一起被替换：新的私钥在主人再次共享之前不会给任何人。备注、自定义字段和改过的名称保留（见 `POST /api/v1/credentials`）。
 - 管理员通过 `/api/v1/admin/*` 可以对任何人的任何凭据做以上所有操作。
 
 ## 公共接口
@@ -287,7 +318,7 @@
 
 ### `POST /api/v1/credentials`
 
-扩展在网站创建通行密钥后调用。请求体是 Credential 去掉统计字段和共享字段：
+扩展在网站创建通行密钥后调用。请求体是 Credential 去掉统计字段、共享字段和 `fields`（请求里的 `fields` 被忽略）：
 
 ```json
 {
@@ -298,9 +329,13 @@
 }
 ```
 
-- 必填：`id`、`rp_id`、`user_handle`、`private_key`、`alg`；`alg` 只接受 `-7` 和 `-257`。其余字段缺省为空字符串。
+- 必填：`id`、`rp_id`、`user_handle`、`private_key`、`alg`；`alg` 只接受 `-7` 和 `-257`。其余字段缺省为空字符串。`label` 最多 1000 个字符。
 - `origin` 非空时必须是 `http://` 或 `https://` 开头的 URL，否则返回 400。
 - **同一网站同一账号覆盖旧凭据**：如果当前用户已拥有 `rp_id`（大小写不敏感）和 `user_handle` 都相同的凭据，先删除它们（连同它们的共享）再插入新凭据。这与真实认证器的行为一致，网站重新注册同一个账号时不会留下重复项。别人共享给你的同账号凭据不受影响。
+- **保留主人做的修改**（共享不保留）：
+  - 所有被覆盖凭据的 `fields` 都留到新凭据上，按最新的凭据在前排列（转移可能让一个账号有几条凭据，它们的字段都不会丢；别人转移给你的同账号凭据上的字段也会合并进来）；
+  - 被覆盖的凭据里最新创建的那一条（`created_at` 最大，相同时取最后插入的）的 `label`，除非请求带了非空的 `label`（扩展注册时总是发空字符串）；
+  - 用 `PATCH` 改过的名称（`rp_name`、`user_name`、`user_display_name` 中改过的那几个）不取请求里的新值，以后再注册也继续保留；没改过的名称取请求里的值。
 - `id` 已经存在（任何用户的，且不属于上面被覆盖的那批）返回 409。
 - 成功返回 201 `{"credential": Credential}`。
 
@@ -310,7 +345,21 @@
 
 ### `PATCH /api/v1/credentials/{id}`
 
-请求 `{"label": "工作号"}`，目前只允许修改 `label`，只有主人能改。返回 200 `{"credential": Credential}`；被共享人返回 403 `forbidden`；无权访问返回 404。
+修改备注、名称和自定义字段，只有主人能改。请求体的成员都可选，但至少要带一个：
+
+```json
+{"label": "工作号", "rp_name": "GitHub（公司）", "user_name": "alice@corp.com", "user_display_name": "Alice",
+ "fields": [{"id": "Xk3pQ9aB", "label": "恢复码", "type": "password", "value": "abcd-efgh"},
+            {"label": "两步验证", "type": "totp", "value": "otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"}]}
+```
+
+- `label`：备注，原样保存，最多 1000 个字符。
+- `rp_name`、`user_name`、`user_display_name`：去掉首尾空白后最多 1000 个字符，可以为空字符串（`rp_name` 为空时界面标题显示 `rp_id`）。凭据 ID、`rp_id`、`user_handle`、密钥和 `alg` 不能修改。实际改变了的名称会被记住，重新注册时保留（见 `POST /credentials`）。
+- `fields`：**整体替换**字段列表，按数组顺序保存，规则见 [Field](#field)。已有字段要带回它的 `id`，否则会被当作删掉旧字段、新加一个字段；`[]` 删除全部字段。
+- 只写实际变化的项；有变化时记一条 `credential.update` 操作日志，没有变化时不记。
+- 返回 200 `{"credential": Credential}`。一个成员都没带返回 400 `invalid_request`（`nothing to update`）；值不合法返回 400 `invalid_request`，`message` 说明原因，字段的错误带下标（从 0 开始），例如 `fields[3]: invalid TOTP secret`、`fields[50]: at most 50 fields are allowed`、`user_name must be at most 1000 characters`。校验在查找凭据之前进行。被共享人返回 403 `forbidden`；无权访问返回 404。
+
+0.6.0 及更早的扩展只发 `{"label": "…"}`，行为不变。
 
 ### `POST /api/v1/credentials/{id}/use`
 
@@ -423,7 +472,7 @@
 |---|---|---|
 | `GET /api/v1/admin/credentials` | 参数见下 | 200 `{"credentials": [Credential], "total": 120, "limit": 100, "offset": 0}`，按 `created_at` 倒序 |
 | `GET /api/v1/admin/credentials/{id}` | — | 200 `{"credential": Credential}` |
-| `PATCH /api/v1/admin/credentials/{id}` | `{"label": "…"}` | 200 `{"credential": Credential}` |
+| `PATCH /api/v1/admin/credentials/{id}` | 同 `PATCH /credentials/{id}`：`{"label"?, "rp_name"?, "user_name"?, "user_display_name"?, "fields"?}` | 200 `{"credential": Credential}`，任何人的凭据 |
 | `DELETE /api/v1/admin/credentials/{id}` | — | 204 |
 | `POST /api/v1/admin/credentials/share` | 同 `POST /credentials/share` | 任何人的凭据 |
 | `POST /api/v1/admin/credentials/unshare` | 同 `POST /credentials/unshare` | 任何人的凭据 |
@@ -437,7 +486,7 @@
 | `owner` / `owner_id` | 主人的用户名 / ID |
 | `shared_with` / `shared_with_id` | 共享给了这个用户（用户名 / ID） |
 | `rp_id` | 网站，大小写不敏感精确匹配 |
-| `q` | 在 `rp_id`、`rp_name`、`user_name`、`user_display_name`、`label` 和主人用户名里做大小写不敏感的子串匹配 |
+| `q` | 在 `rp_id`、`rp_name`、`user_name`、`user_display_name`、`label`、自定义字段的 `label`（不含字段的值）和主人用户名里做大小写不敏感的子串匹配 |
 | `shared` | `true` 只看有共享的，`false` 只看没有共享的 |
 | `limit` / `offset` | 分页，`limit` 默认 100、范围 1–500，`offset` 默认 0 |
 
@@ -456,13 +505,22 @@
 
 ## 数据库升级
 
-数据库结构的版本记在 SQLite 的 `PRAGMA user_version` 里。启动时如果数据库版本低于程序版本，服务端会先用 `VACUUM INTO` 在数据库旁边留一份完整副本（例如 `passkey-box.pre-v1-20261123T010203Z.db`，日志里会打印路径），再在一个事务里升级。升级只增加表、列和索引，不改写已有数据；失败时整体回滚，服务拒绝启动，数据库保持原样。旧版本的程序可以继续打开升级后的数据库，回滚部署不需要恢复数据。回滚时注意：
+数据库结构的版本记在 SQLite 的 `PRAGMA user_version` 里：
+
+| 版本 | 程序 | 变化 |
+|---|---|---|
+| 0 | 0.5.0 及更早 | 用户、会话、凭据 |
+| 1 | 0.6.0 | 共享、API 令牌、操作日志三张表，用户的停用和备注两列，凭据 ID 全站唯一 |
+| 2 | 0.7.0 | 凭据加 `fields`（自定义字段的 JSON 数组，默认 `'[]'`）和 `edited`（改过的名称，默认 `''`）两列 |
+
+启动时如果数据库版本低于程序版本，服务端会先用 `VACUUM INTO` 在数据库旁边留一份完整副本（例如 `passkey-box.pre-v2-20261123T010203Z.db`，`pre-v2` 表示升级到版本 2 之前，副本里的版本号还是升级前的；权限与数据库文件相同；日志里会打印路径），再在一个事务里一次升级到程序的版本（版本 0 的数据库直接升到 2）。升级只增加表、列和索引，不改写已有数据；失败时整体回滚，服务拒绝启动，数据库保持原样。旧版本的程序可以继续打开升级后的数据库（它们按列名读写，新列有默认值），回滚部署不需要恢复数据。回滚时注意：
 
 - 旧版本不认识「停用」，回滚后被停用的用户又能登录，回滚前请先重置他们的密码。
 - 回滚期间在旧版本里重新注册或删除通行密钥，会连带删掉它们的共享；再升级回来后这些共享不会恢复。
+- 0.6.0 不显示自定义字段（改过的名称照常显示），也不会改动它们；但在 0.6.0 里重新注册的通行密钥不保留备注、自定义字段和改过的名称。
 
 需要恢复到升级前的副本时：先停止服务，删除数据库旁边的 `-wal`、`-shm` 文件，再用副本覆盖数据库文件，最后启动旧版本。不删 `-wal` 就覆盖，SQLite 会把升级后写入的日志重放到副本上，得到一个损坏的数据库。
 
-备份请用 SQLite 的 `.backup`、`VACUUM INTO` 或在服务停止时复制文件。用 `.dump` 恢复的数据库会丢失结构版本号，服务端会根据表结构自动认出它已经升级过。
+备份请用 SQLite 的 `.backup`、`VACUUM INTO` 或在服务停止时复制文件。用 `.dump` 恢复的数据库会丢失结构版本号，服务端会根据表结构自动认出它升级到了哪个版本（包括 0.6.0 打开过、把版本记成 1 的版本 2 数据库），不会重复升级；只有某个版本的一部分表或列时拒绝启动。
 
 0.6.0 起凭据 ID 全站唯一。如果旧数据库里有两个用户存着相同 ID 的凭据，升级会在复制数据库之前失败，并在日志里给出这个 ID，需要先删掉其中一条再启动。

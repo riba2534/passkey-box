@@ -2,10 +2,13 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Start-up makes whoever holds PKB_ADMIN_USERNAME an administrator, so that
@@ -93,12 +96,101 @@ func TestLogicalBackupRestoreIsNotMigratedAgain(t *testing.T) {
 	}
 }
 
+// A schema 1 database restored from a logical backup is migrated once, like
+// the version 1 database it was.
+func TestLogicalBackupOfSchema1IsMigrated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pkb.db")
+	writeV1Database(t, path)
+	db := openRaw(t, path)
+	mustExec(t, db, `PRAGMA user_version = 0`)
+	before := dumpRows(t, db, v1Columns)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.Migration.From != 1 || s.Migration.To != 2 || s.Migration.Snapshot == "" || userVersion(t, s.db) != 2 {
+		t.Fatalf("migration = %+v", s.Migration)
+	}
+	if got := dumpRows(t, s.db, v1Columns); !reflect.DeepEqual(got, before) {
+		t.Fatal("rows changed by the migration")
+	}
+	expectSchema2Defaults(t, s.db, 5)
+	if got := snapshots(t, dir); len(got) != 1 {
+		t.Fatalf("snapshots = %v", got)
+	}
+}
+
+// 0.6.0 sets version 1 on a schema 2 database restored from a logical backup,
+// which already has the schema 2 columns.
+func TestSchema2AtVersion1IsNotMigratedAgain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pkb.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.db, `PRAGMA user_version = 1`)
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open = %v", err)
+	}
+	defer s.Close()
+	if v := userVersion(t, s.db); v != 2 || s.Migration.From != 2 || s.Migration.Snapshot != "" {
+		t.Fatalf("user_version = %d, migration %+v", v, s.Migration)
+	}
+	if got := snapshots(t, dir); len(got) != 0 {
+		t.Fatalf("snapshots = %v", got)
+	}
+}
+
 func TestPartialSchemaV1IsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pkb.db")
 	writeV0Database(t, path, nil)
 	mustExec(t, openRaw(t, path), `CREATE TABLE audit_log (id INTEGER PRIMARY KEY)`)
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "part of schema 1") {
 		t.Fatalf("Open = %v", err)
+	}
+}
+
+func TestPartialSchemaV2IsRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		write   func(t *testing.T, path string)
+		version int
+		stmts   []string
+		want    string
+	}{
+		"one column at version 1": {func(t *testing.T, path string) { writeV1Database(t, path) }, 1,
+			[]string{`ALTER TABLE credentials ADD COLUMN edited TEXT NOT NULL DEFAULT ''`}, "part of schema 2"},
+		"one column at version 0": {func(t *testing.T, path string) { writeV1Database(t, path) }, 0,
+			[]string{`ALTER TABLE credentials ADD COLUMN fields TEXT NOT NULL DEFAULT '[]'`}, "part of schema 2"},
+		"without schema 1": {func(t *testing.T, path string) { writeV0Database(t, path, nil) }, 0,
+			[]string{`ALTER TABLE credentials ADD COLUMN fields TEXT NOT NULL DEFAULT '[]'`,
+				`ALTER TABLE credentials ADD COLUMN edited TEXT NOT NULL DEFAULT ''`}, "schema 2 without schema 1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "pkb.db")
+			tc.write(t, path)
+			db := openRaw(t, path)
+			for _, stmt := range tc.stmts {
+				mustExec(t, db, stmt)
+			}
+			mustExec(t, db, fmt.Sprintf(`PRAGMA user_version = %d`, tc.version))
+			if _, err := Open(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Open = %v, want %q", err, tc.want)
+			}
+			if got := snapshots(t, dir); len(got) != 0 {
+				t.Fatalf("snapshots = %v", got)
+			}
+			if v := userVersion(t, db); v != tc.version {
+				t.Fatalf("user_version = %d", v)
+			}
+		})
 	}
 }
 
@@ -117,5 +209,66 @@ func TestSnapshotIsAsPrivateAsTheDatabase(t *testing.T) {
 	fi, err := os.Stat(s.Migration.Snapshot)
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("snapshot mode = %v, %v", fi.Mode(), err)
+	}
+}
+
+// otpauth parameter names fold ASCII letters only, like the console and the
+// extension: "DİGITS" (U+0130) is not "digits" anywhere.
+func TestOtpauthParameterNamesFoldASCIIOnly(t *testing.T) {
+	const base = "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP"
+	if msg := checkTOTP(base + "&D%C4%B0GITS=9"); msg != "" {
+		t.Fatalf("a non-ASCII parameter name was read as digits: %s", msg)
+	}
+	if msg := checkTOTP(base + "&DIGITS=9"); msg == "" {
+		t.Fatal("DIGITS=9 accepted")
+	}
+}
+
+// A hand-edited fields value must not break the lists that contain it.
+func TestUnreadableFieldsDoNotBreakLists(t *testing.T) {
+	f := newFixture(t, "alice", "root")
+	ctx := t.Context()
+	f.save("alice", "YQ", "a.com", "MQ", 0)
+	f.save("alice", "Yg", "b.com", "Mg", 0)
+	for _, bad := range []string{"", "{}", `"x"`, "not json", "[1]", `["x"]`, `[1,"hit"]`} {
+		mustExec(t, f.s.db, `UPDATE credentials SET fields = ? WHERE id = 'YQ'`, bad)
+		creds, err := f.s.ListCredentials(ctx, f.users["alice"].ID, "")
+		if err != nil || len(creds) != 2 {
+			t.Fatalf("fields %q: list = %d, %v", bad, len(creds), err)
+		}
+		if _, _, err := f.s.ListAllCredentials(ctx, CredentialFilter{Query: "no-such-text", Limit: 10}); err != nil {
+			t.Fatalf("fields %q: admin search = %v", bad, err)
+		}
+	}
+}
+
+// Clients may pick field IDs: fields with the same ID but different content
+// on two replaced credentials are both kept.
+func TestReRegistrationKeepsFieldsSharingAnID(t *testing.T) {
+	f := newFixture(t, "alice", "bob")
+	ctx := t.Context()
+	set := func(owner, id, value string) {
+		t.Helper()
+		if _, err := f.s.UpdateCredential(ctx, f.actor(owner), f.users[owner].ID, id,
+			CredentialUpdate{Fields: &[]Field{{ID: "f0", Type: "text", Value: value}, {ID: "same", Type: "text", Value: "x"}}}, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.save("alice", "YQ", "a.com", "aA", 0)
+	set("alice", "YQ", "alice's")
+	f.save("bob", "Yg", "a.com", "aA", time.Hour)
+	set("bob", "Yg", "bob's")
+	if _, err := f.s.TransferCredentials(ctx, f.batch("bob", "Yg"), UserKey{Username: "alice"}, false); err != nil {
+		t.Fatal(err)
+	}
+	c := f.save("alice", "bmV3", "a.com", "aA", 2*time.Hour)
+	var values []string
+	ids := map[string]bool{}
+	for _, fl := range c.Fields {
+		values = append(values, fl.Value)
+		ids[fl.ID] = true
+	}
+	if strings.Join(values, ",") != "bob's,x,alice's" || len(ids) != 3 {
+		t.Fatalf("fields = %+v", c.Fields)
 	}
 }

@@ -329,6 +329,58 @@ body.popup {
   word-break: break-all;
 }
 
+/* Custom fields: the owner's label above its value, the value's buttons on the right. */
+.custom-fields {
+  margin-top: 10px;
+}
+
+.custom-fields .field-row {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.custom-fields .field-row dt {
+  width: auto;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.custom-fields .field-row dd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field-value {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.totp-code {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.totp-remaining {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.field-actions .btn {
+  height: 26px;
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
@@ -539,11 +591,16 @@ button.primary:focus-visible {
   left: 50%;
   bottom: 96px;
   transform: translateX(-50%);
+  max-width: calc(100% - 32px);
   padding: 6px 12px;
   border-radius: 6px;
   background: rgba(27, 31, 36, 0.9);
   color: #fff;
   font-size: 13px;
+  /* "已复制<label>" names a custom field the owner may have labelled at length. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------------------------------------------------------------- login */

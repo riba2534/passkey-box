@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
+import type { Field, FieldType } from "../src/lib/api";
 import {
   accountName,
   credentialTitle,
   detailFields,
+  fieldLabel,
+  fieldLink,
+  fieldText,
   formatTime,
+  groupCode,
   groupCredentials,
   matchesQuery,
   removeAction,
@@ -129,5 +134,43 @@ describe("popup model: passkeys shared by other users", () => {
     expect(removeAction(legacy)).toEqual(deletion);
     // The server decides what DELETE does, even if it did not name the owner.
     expect(removeAction(cred({ access: "shared" })).label).toBe("移除共享");
+  });
+});
+
+describe("popup model: custom fields", () => {
+  const field = (type: FieldType, value: string, label = ""): Field => ({ id: "x", label, type, value });
+
+  it("are named by their label, else by their type", () => {
+    expect(fieldLabel(field("password", "", "  恢复码 "))).toBe("恢复码");
+    const names = (["text", "password", "url", "email", "phone", "date", "multiline", "totp"] as const).map((t) => fieldLabel(field(t, "", " ")));
+    expect(names).toEqual(["文本", "密码", "网址", "邮箱", "电话", "日期", "多行文本", "一次性密码"]);
+    // A type from a newer server.
+    for (const type of ["passport", "constructor", "__proto__"]) expect(fieldLabel(field(type as FieldType, ""))).toBe("字段");
+  });
+
+  it("show their value; passwords until revealed and TOTP secrets never", () => {
+    expect(fieldText(field("text", "E-1024"))).toBe("E-1024");
+    expect(fieldText(field("multiline", "a\nb"))).toBe("a\nb");
+    expect(fieldText(field("password", "hunter2"))).toBe("••••••••");
+    expect(fieldText(field("password", "hunter2"), true)).toBe("hunter2");
+    expect(fieldText(field("totp", "GEZDGNBV"))).toBe("••••••••");
+    expect(fieldText(field("totp", "GEZDGNBV"), true)).toBe("••••••••");
+    expect(fieldText(field("text", ""))).toBe("—");
+    expect(fieldText(field("password", ""))).toBe("—");
+  });
+
+  it("link only http(s) URLs of url fields", () => {
+    expect(fieldLink(field("url", "https://admin.example.com/login?a=1"))).toBe("https://admin.example.com/login?a=1");
+    expect(fieldLink(field("url", " HTTP://Example.com "))).toBe("http://example.com/");
+    for (const value of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd", "chrome://settings", "ftp://example.com", "example.com", "not a url", ""]) {
+      expect([value, fieldLink(field("url", value))]).toEqual([value, null]);
+    }
+    for (const type of ["text", "email", "multiline"] as const) expect(fieldLink(field(type, "https://example.com"))).toBeNull();
+  });
+
+  it("group one-time codes in two", () => {
+    expect(groupCode("123456")).toBe("123 456");
+    expect(groupCode("1234567")).toBe("1234 567");
+    expect(groupCode("12345678")).toBe("1234 5678");
   });
 });

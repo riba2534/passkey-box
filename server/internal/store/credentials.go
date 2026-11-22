@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // How a user reaches a credential (Credential.Access, AccessFilter.Access).
@@ -28,10 +31,12 @@ type Credential struct {
 	PublicKey       string
 	SignCount       int64
 	Label           string
-	Origin          string
-	CreatedAt       time.Time
-	LastUsedAt      *time.Time
-	UseCount        int64
+	// Fields are the custom fields, never nil.
+	Fields     []Field
+	Origin     string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	UseCount   int64
 
 	Owner UserBrief
 	// Access is how the user the credential was loaded for reaches it,
@@ -43,6 +48,32 @@ type Credential struct {
 	Shares []Share
 
 	seq int64
+	// edited lists the name columns the user changed (see nameColumns),
+	// comma-separated in that order.
+	edited string
+}
+
+// nameColumns are the credential's names a user can edit. They are only
+// shown, never signed.
+var nameColumns = []string{"rp_name", "user_name", "user_display_name"}
+
+// names points at the values of nameColumns.
+func (c *Credential) names() []*string { return []*string{&c.RPName, &c.UserName, &c.UserDisplayName} }
+
+// isEdited reports whether the user changed the name column.
+func (c *Credential) isEdited(column string) bool {
+	return slices.Contains(strings.Split(c.edited, ","), column)
+}
+
+// markEdited adds columns to the edited name columns.
+func (c *Credential) markEdited(columns ...string) {
+	var out []string
+	for _, col := range nameColumns {
+		if c.isEdited(col) || slices.Contains(columns, col) {
+			out = append(out, col)
+		}
+	}
+	c.edited = strings.Join(out, ",")
 }
 
 // Share is a credential shared with a user.
@@ -60,7 +91,7 @@ type Share struct {
 // joined with their owner o (credentialsFrom).
 const credentialColumns = `c.seq, c.user_id, o.username, c.id, c.rp_id, c.rp_name, c.user_handle, c.user_name,
 	c.user_display_name, c.alg, c.private_key, c.public_key, c.sign_count, c.label, c.origin, c.created_at,
-	c.last_used_at, c.use_count`
+	c.last_used_at, c.use_count, c.fields, c.edited`
 
 const credentialsFrom = ` FROM credentials c JOIN users o ON o.id = c.user_id`
 
@@ -84,10 +115,11 @@ func scanCredential(r rowScanner, trailing ...any) (Credential, error) {
 		c        Credential
 		created  int64
 		lastUsed sql.NullInt64
+		fields   string
 	)
 	dest := append([]any{&c.seq, &c.Owner.ID, &c.Owner.Username, &c.ID, &c.RPID, &c.RPName, &c.UserHandle,
 		&c.UserName, &c.UserDisplayName, &c.Alg, &c.PrivateKey, &c.PublicKey, &c.SignCount, &c.Label, &c.Origin,
-		&created, &lastUsed, &c.UseCount}, trailing...)
+		&created, &lastUsed, &c.UseCount, &fields, &c.edited}, trailing...)
 	if err := r.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Credential{}, ErrNotFound
@@ -96,6 +128,16 @@ func scanCredential(r rowScanner, trailing ...any) (Credential, error) {
 	}
 	c.CreatedAt = fromMillis(created)
 	c.LastUsedAt = fromNullMillis(lastUsed)
+	if err := json.Unmarshal([]byte(fields), &c.Fields); err != nil {
+		// Only a hand-edited database holds such a value. Keep the passkey
+		// usable (old extensions sign in through these lists) rather than
+		// failing every list that contains it.
+		log.Printf("ignoring the unreadable fields of credential %s: %v", c.ID, err)
+		c.Fields = nil
+	}
+	if c.Fields == nil {
+		c.Fields = []Field{}
+	}
 	return c, nil
 }
 
@@ -258,8 +300,9 @@ type CredentialFilter struct {
 	// RPID matches rp_id case-insensitively.
 	RPID string
 	// Query is a case-insensitive substring of the rp_id, rp_name, user_name,
-	// user_display_name, label or owner's username. Case folding beyond ASCII
-	// only applies to the username.
+	// user_display_name, label, a custom field's label (not its value) or the
+	// owner's username. Case folding beyond ASCII only applies to the
+	// username.
 	Query string
 	// Shared keeps credentials shared with at least one user (true) or with
 	// nobody (false).
@@ -303,8 +346,10 @@ func (s *Store) ListAllCredentials(ctx context.Context, f CredentialFilter) ([]C
 	if f.Query != "" {
 		q := strings.ToLower(f.Query)
 		add(`(instr(lower(c.rp_id), ?) OR instr(lower(c.rp_name), ?) OR instr(lower(c.user_name), ?)
-			OR instr(lower(c.user_display_name), ?) OR instr(lower(c.label), ?) OR instr(o.username_key, ?))`,
-			q, q, q, q, q, q)
+			OR instr(lower(c.user_display_name), ?) OR instr(lower(c.label), ?) OR instr(o.username_key, ?)
+			OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(c.fields) AND json_type(c.fields) = 'array' THEN c.fields ELSE '[]' END)
+				WHERE type = 'object' AND instr(lower(json_extract(value, '$.label')), ?)))`,
+			q, q, q, q, q, q, q)
 	}
 	if f.Shared != nil {
 		cond := `EXISTS (SELECT 1 FROM credential_shares s WHERE s.credential_seq = c.seq)`
@@ -338,12 +383,57 @@ var errCredentialIDTaken = &conflictError{"credential id already exists"}
 // account, together with their shares: a new private key reaches nobody until
 // the owner shares it again. (Moving the shares would let a credential someone
 // else transferred in with keep_access, or a revoked recipient, receive the
-// owner's next key.) If the ID is still taken by another credential, nothing
-// changes and ErrConflict is returned. Statistics on c are ignored.
+// owner's next key.) What the user made of the replaced credentials stays:
+// the fields of all of them, newest first (a transfer can leave several for
+// one account), and, from the newest, its label unless c has one and the names
+// the user edited, which take the place of those on c. If the ID is still
+// taken by another credential, nothing changes and ErrConflict is returned.
+// Statistics and fields on c are ignored.
 func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c Credential, now time.Time) (Credential, error) {
 	var saved Credential
 	err := s.inTx(ctx, false, func(tx *sql.Tx) error {
 		rpKey := strings.ToLower(c.RPID)
+		replaced, err := queryRows(ctx, tx, func(r rowScanner) (Credential, error) { return scanCredential(r) },
+			`SELECT `+credentialColumns+credentialsFrom+` WHERE c.user_id = ? AND c.rp_id_key = ? AND c.user_handle = ?
+			ORDER BY c.created_at DESC, c.seq DESC`, userID, rpKey, c.UserHandle)
+		if err != nil {
+			return err
+		}
+		var prev Credential
+		kept := []Field{}
+		if len(replaced) > 0 {
+			prev = replaced[0]
+			if c.Label == "" {
+				c.Label = prev.Label
+			}
+			for i, col := range nameColumns {
+				if prev.isEdited(col) {
+					*c.names()[i] = *prev.names()[i]
+				}
+			}
+			// Clients may choose field IDs, so two credentials can use the
+			// same one for different fields: keep both under fresh IDs.
+			seen := map[string]Field{}
+			for _, r := range replaced {
+				for _, f := range r.Fields {
+					if prev, ok := seen[f.ID]; ok {
+						if prev == f {
+							continue
+						}
+						for ok {
+							f.ID = newFieldID()
+							_, ok = seen[f.ID]
+						}
+					}
+					seen[f.ID] = f
+					kept = append(kept, f)
+				}
+			}
+		}
+		fields, err := json.Marshal(kept)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM credentials WHERE user_id = ? AND rp_id_key = ? AND user_handle = ?`,
 			userID, rpKey, c.UserHandle); err != nil {
@@ -351,7 +441,7 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 		}
 		var exists int
 		// IDs are unique across all users (schema 1).
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE id = ?`, c.ID).Scan(&exists)
+		err = tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE id = ?`, c.ID).Scan(&exists)
 		if err == nil {
 			return errCredentialIDTaken
 		}
@@ -360,10 +450,10 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO credentials
 			(user_id, id, rp_id, rp_id_key, rp_name, user_handle, user_name, user_display_name, alg,
-			 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
+			 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count, fields, edited)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)`,
 			userID, c.ID, c.RPID, rpKey, c.RPName, c.UserHandle, c.UserName, c.UserDisplayName, c.Alg,
-			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now))
+			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now), string(fields), prev.edited)
 		if err != nil {
 			return err
 		}
@@ -380,10 +470,59 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 	return saved, nil
 }
 
-// SetCredentialLabel changes the note of a credential the user owns. A
-// credential shared with the user is ErrForbidden.
-func (s *Store) SetCredentialLabel(ctx context.Context, actor Actor, userID int64, id, label string, now time.Time) (Credential, error) {
-	return s.setLabel(ctx, actor, label, now, func(q queryer) (Credential, error) {
+// MaxCredentialNameLen is the maximum length in characters of an edited
+// rp_name, user_name or user_display_name after trimming, and of a label.
+const MaxCredentialNameLen = 1000
+
+// CredentialUpdate changes a credential; nil fields are left as they are and
+// at least one must be set. The names are trimmed. Fields replaces the whole
+// list; see normalizeFields for its rules.
+type CredentialUpdate struct {
+	Label           *string
+	RPName          *string
+	UserName        *string
+	UserDisplayName *string
+	Fields          *[]Field
+}
+
+// names points at the new values of nameColumns, nil for those left alone.
+func (u *CredentialUpdate) names() []**string {
+	return []**string{&u.RPName, &u.UserName, &u.UserDisplayName}
+}
+
+// normalize checks u and returns it with the names trimmed and the fields
+// normalized, new field IDs coming from newID.
+func (u CredentialUpdate) normalize(newID func() string) (CredentialUpdate, error) {
+	if u.Label == nil && u.Fields == nil && !slices.ContainsFunc(u.names(), func(p **string) bool { return *p != nil }) {
+		return u, Invalid("nothing to update")
+	}
+	if u.Label != nil && utf8.RuneCountInString(*u.Label) > MaxCredentialNameLen {
+		return u, Invalid("label must be at most %d characters", MaxCredentialNameLen)
+	}
+	for i, p := range u.names() {
+		if *p == nil {
+			continue
+		}
+		v := strings.TrimSpace(**p)
+		if utf8.RuneCountInString(v) > MaxCredentialNameLen {
+			return u, Invalid("%s must be at most %d characters", nameColumns[i], MaxCredentialNameLen)
+		}
+		*p = &v
+	}
+	if u.Fields != nil {
+		fields, err := normalizeFields(*u.Fields, newID)
+		if err != nil {
+			return u, err
+		}
+		u.Fields = &fields
+	}
+	return u, nil
+}
+
+// UpdateCredential changes a credential the user owns. A credential shared
+// with the user is ErrForbidden.
+func (s *Store) UpdateCredential(ctx context.Context, actor Actor, userID int64, id string, u CredentialUpdate, now time.Time) (Credential, error) {
+	return s.updateCredential(ctx, actor, u, now, func(q queryer) (Credential, error) {
 		c, err := getAccessible(ctx, q, userID, id)
 		if err == nil && c.Access != AccessOwner {
 			return Credential{}, ErrForbidden
@@ -392,33 +531,112 @@ func (s *Store) SetCredentialLabel(ctx context.Context, actor Actor, userID int6
 	})
 }
 
-// AdminSetCredentialLabel changes the note of any credential.
-func (s *Store) AdminSetCredentialLabel(ctx context.Context, actor Actor, id, label string, now time.Time) (Credential, error) {
-	return s.setLabel(ctx, actor, label, now, func(q queryer) (Credential, error) { return getAny(ctx, q, id) })
+// AdminUpdateCredential changes any credential.
+func (s *Store) AdminUpdateCredential(ctx context.Context, actor Actor, id string, u CredentialUpdate, now time.Time) (Credential, error) {
+	return s.updateCredential(ctx, actor, u, now, func(q queryer) (Credential, error) { return getAny(ctx, q, id) })
 }
 
-func (s *Store) setLabel(ctx context.Context, actor Actor, label string, now time.Time, load func(queryer) (Credential, error)) (Credential, error) {
+// updateCredential applies u to the credential load returns. When anything
+// changed it records credential.update with the changes: from and to for the
+// label and names, the labels (never the values) of the fields added, removed
+// and changed (all three empty when only the order changed). Names that
+// changed count as edited from then on, which SaveCredential honours.
+func (s *Store) updateCredential(ctx context.Context, actor Actor, u CredentialUpdate, now time.Time, load func(queryer) (Credential, error)) (Credential, error) {
+	u, err := u.normalize(newFieldID)
+	if err != nil {
+		return Credential{}, err
+	}
 	var out Credential
-	err := s.inTx(ctx, false, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, false, func(tx *sql.Tx) error {
 		c, err := load(tx)
 		if err != nil {
 			return err
 		}
-		if c.Label != label {
-			if _, err := tx.ExecContext(ctx, `UPDATE credentials SET label = ? WHERE seq = ?`, label, c.seq); err != nil {
+		ref := c.audit()
+		var (
+			detail = map[string]any{}
+			sets   []string
+			args   []any
+		)
+		set := func(column string, value any) {
+			sets = append(sets, column+" = ?")
+			args = append(args, value)
+		}
+		text := func(column string, field, to *string) bool {
+			if to == nil || *to == *field {
+				return false
+			}
+			detail[column] = fromTo{*field, *to}
+			set(column, *to)
+			*field = *to
+			return true
+		}
+		text("label", &c.Label, u.Label)
+		var edited []string
+		for i, col := range nameColumns {
+			if text(col, c.names()[i], *u.names()[i]) {
+				edited = append(edited, col)
+			}
+		}
+		before := c.edited
+		if c.markEdited(edited...); c.edited != before {
+			set("edited", c.edited)
+		}
+		if u.Fields != nil && !slices.Equal(c.Fields, *u.Fields) {
+			data, err := json.Marshal(*u.Fields)
+			if err != nil {
+				return err
+			}
+			detail["fields"] = diffFields(c.Fields, *u.Fields)
+			set("fields", string(data))
+			c.Fields = *u.Fields
+		}
+		if len(sets) > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE credentials SET `+strings.Join(sets, ", ")+` WHERE seq = ?`,
+				append(args, c.seq)...); err != nil {
 				return err
 			}
 			if err := writeAudit(ctx, tx, now, actor, AuditEntry{Action: "credential.update",
-				Subject: &c.Owner, Credential: c.audit(),
-				Detail: map[string]any{"label": fromTo{c.Label, label}}}); err != nil {
+				Subject: &c.Owner, Credential: ref, Detail: detail}); err != nil {
 				return err
 			}
-			c.Label = label
 		}
 		out, err = withShares(ctx, tx, c, nil)
 		return err
 	})
 	return out, err
+}
+
+// fieldChanges is the fields entry of a credential.update event.
+type fieldChanges struct {
+	Added   []string `json:"added"`
+	Removed []string `json:"removed"`
+	Changed []string `json:"changed"`
+}
+
+// diffFields compares two lists of fields by ID and names the fields added,
+// removed and changed (label, type or value) by their labels.
+func diffFields(from, to []Field) fieldChanges {
+	d := fieldChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}
+	old := make(map[string]Field, len(from))
+	for _, f := range from {
+		old[f.ID] = f
+	}
+	for _, f := range to {
+		switch o, ok := old[f.ID]; {
+		case !ok:
+			d.Added = append(d.Added, f.Label)
+		case o != f:
+			d.Changed = append(d.Changed, f.Label)
+		}
+		delete(old, f.ID)
+	}
+	for _, f := range from {
+		if _, ok := old[f.ID]; ok {
+			d.Removed = append(d.Removed, f.Label)
+		}
+	}
+	return d
 }
 
 // MarkCredentialUsed increments the use counter of a credential the user owns

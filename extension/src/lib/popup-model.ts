@@ -1,6 +1,6 @@
 // Pure helpers behind the popup's credential list and detail views.
 
-import { sharedBy, type Credential } from "./api";
+import { sharedBy, type Credential, type Field, type FieldType } from "./api";
 import { hostMatchesRpId } from "./rpid";
 
 export function credentialTitle(c: Pick<Credential, "rp_name" | "rp_id">): string {
@@ -31,6 +31,44 @@ export function detailFields(c: Credential): Array<[string, string]> {
   ];
 }
 
+const FIELD_TYPE_NAMES: Record<FieldType, string> = {
+  text: "文本",
+  password: "密码",
+  url: "网址",
+  email: "邮箱",
+  phone: "电话",
+  date: "日期",
+  multiline: "多行文本",
+  totp: "一次性密码",
+};
+
+/** A field's label, or the name of its type when the label is empty. */
+export function fieldLabel(f: Pick<Field, "label" | "type">): string {
+  return f.label.trim() || (Object.hasOwn(FIELD_TYPE_NAMES, f.type) ? FIELD_TYPE_NAMES[f.type] : "字段");
+}
+
+const MASKED = "••••••••";
+
+/**
+ * A field's value as the detail view shows it, "—" when empty. A password stays masked until revealed and a
+ * TOTP secret always does: its row shows the current code instead.
+ */
+export function fieldText(f: Pick<Field, "type" | "value">, revealed = false): string {
+  if (!f.value) return "—";
+  return f.type === "totp" || (f.type === "password" && !revealed) ? MASKED : f.value;
+}
+
+/** The page a "url" field opens: only http(s) URLs are links, anything else is plain text. */
+export function fieldLink(f: Pick<Field, "type" | "value">): string | null {
+  return f.type === "url" ? (httpURL(f.value.trim())?.href ?? null) : null;
+}
+
+/** "123 456": a one-time code in two groups, the longer one first. */
+export function groupCode(code: string): string {
+  const half = Math.ceil(code.length / 2);
+  return `${code.slice(0, half)} ${code.slice(half)}`;
+}
+
 export interface RemoveAction {
   label: string;
   done: string;
@@ -46,12 +84,16 @@ export function removeAction(c: Pick<Credential, "access">): RemoveAction {
 
 /** Hostname of an http(s) tab URL, or "" for chrome://, file:, about: and invalid URLs. */
 export function tabHostname(url: string | undefined): string {
-  if (!url) return "";
+  return (url && httpURL(url)?.hostname) || "";
+}
+
+/** `text` parsed as an http(s) URL, or null for other schemes and invalid URLs. */
+function httpURL(text: string): URL | null {
   try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.hostname : "";
+    const u = new URL(text);
+    return u.protocol === "http:" || u.protocol === "https:" ? u : null;
   } catch {
-    return "";
+    return null;
   }
 }
 

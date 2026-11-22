@@ -170,3 +170,106 @@ func TestSessionsRefuseCrossSiteWrites(t *testing.T) {
 	}
 	res.Body.Close()
 }
+
+// The largest valid fields list, 50 fields of 10000 CJK characters (three
+// bytes each in UTF-8), must fit in a request body.
+func TestLargestFieldsListFitsInARequest(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	fields := make([]map[string]string, 50)
+	for i := range fields {
+		fields[i] = map[string]string{"label": "字段", "type": "multiline", "value": strings.Repeat("密", 10000)}
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": fields}).expect(http.StatusOK)
+}
+
+// Clients such as Python's json.dumps escape every non-ASCII character; the
+// largest valid fields list must still fit, and a body over the limit gets a
+// clear 413 instead of "invalid JSON body".
+func TestRequestBodyLimit(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	value := strings.Repeat(`\ud83d\ude00`, 10000) // one emoji per character, escaped as a surrogate pair (12 bytes)
+	var b strings.Builder
+	b.WriteString(`{"fields":[`)
+	for i := range 50 {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"label":"x","type":"multiline","value":"` + value + `"}`)
+	}
+	b.WriteString(`]}`)
+	c.do("PATCH", "/api/v1/credentials/YQ", b.String()).expect(http.StatusOK)
+
+	r := c.do("PATCH", "/api/v1/credentials/YQ", `{"label":"`+strings.Repeat("x", 9<<20)+`"}`)
+	r.expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+}
+
+func TestLabelLengthIsCapped(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1000)}).expect(http.StatusOK)
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1001)}).expectError(http.StatusBadRequest, "invalid_request")
+}
+
+func TestOnlyCredentialUpdatesTakeLargeBodies(t *testing.T) {
+	e := newEnv(t, func(o *api.Options) { o.AllowRegister = true })
+	big := `{"username":"` + strings.Repeat("x", 2<<20) + `","password":"pw"}`
+	e.anon().do("POST", "/api/v1/auth/login", big).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+	e.anon().do("POST", "/api/v1/auth/register", big).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+}
+
+func TestRegisteredLabelIsCapped(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	cred := newCred("YQ", "a.com", "YQ")
+	cred["label"] = strings.Repeat("备", 1001)
+	c.do("POST", "/api/v1/credentials", cred).expectError(http.StatusBadRequest, "invalid_request")
+	cred["label"] = strings.Repeat("备", 1000)
+	c.do("POST", "/api/v1/credentials", cred).expect(http.StatusCreated)
+}
+
+// A shared passkey carries its owner's fields: a link field must not hide
+// where it goes behind bidirectional formatting. Such marks (common in copied
+// phone numbers) are dropped; control characters are refused.
+func TestLinkFieldsDropMisleadingCharacters(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	var body struct {
+		Credential struct {
+			Fields []struct{ Type, Value string } `json:"fields"`
+		} `json:"credential"`
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{
+		map[string]string{"type": "url", "value": "https://evil.example/\u202emoc.buhtig"},
+		map[string]string{"type": "email", "value": "alice\u200f@github.com"},
+		map[string]string{"type": "phone", "value": "\u202a+86 138 0000 0000\u202c"},
+		map[string]string{"type": "text", "value": "\u05e9\u202e"},
+		map[string]string{"type": "url", "value": "https://例子.测试/路径?q=1#x"},
+	}}).expect(http.StatusOK).decode(&body)
+	got := []string{}
+	for _, f := range body.Credential.Fields {
+		got = append(got, f.Value)
+	}
+	want := []string{"https://evil.example/moc.buhtig", "alice@github.com", "+86 138 0000 0000", "\u05e9\u202e", "https://例子.测试/路径?q=1#x"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("values = %q, want %q", got, want)
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{
+		map[string]string{"type": "url", "value": "https://a.com/\x07"}}}).expectError(http.StatusBadRequest, "invalid_request")
+}
+
+func TestOversizedBodyAfterAValueIsStill413(t *testing.T) {
+	e := newEnv(t)
+	body := `{"username":"a","password":"b"}` + strings.Repeat(" ", 1<<20)
+	e.anon().do("POST", "/api/v1/auth/login", body).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+}

@@ -39,6 +39,20 @@ export type Credential = {
   access?: 'owner' | 'shared';
   shared_at?: string | null;
   shared_with?: Share[];
+  // Since 0.7.0.
+  fields?: Field[];
+};
+
+export type FieldType = 'text' | 'password' | 'url' | 'email' | 'phone' | 'date' | 'multiline' | 'totp';
+export type Field = { id: string; label: string; type: FieldType; value: string };
+
+/** PATCH body: every key is optional. `fields` replaces the whole list; a field without `id` is new. */
+export type CredentialUpdate = {
+  label?: string;
+  rp_name?: string;
+  user_name?: string;
+  user_display_name?: string;
+  fields?: Array<Omit<Field, 'id'> & { id?: string }>;
 };
 
 export type CredentialBrief = { id: string; rp_id: string; user_name: string; owner: UserBrief };
@@ -98,6 +112,12 @@ export class PkbApi {
   async getCredential(account: Account, id: string): Promise<Credential> {
     const path = `/api/v1/credentials/${encodeURIComponent(id)}`;
     return (await this.request<{ credential: Credential }>(account, 'GET', path)).credential;
+  }
+
+  /** As the owner. */
+  async updateCredential(account: Account, id: string, update: CredentialUpdate): Promise<Credential> {
+    const path = `/api/v1/credentials/${encodeURIComponent(id)}`;
+    return (await this.request<{ credential: Credential }>(account, 'PATCH', path, update)).credential;
   }
 
   async share(account: Account, ids: string[], users: UserRef[]): Promise<Batch<ShareResult>> {
