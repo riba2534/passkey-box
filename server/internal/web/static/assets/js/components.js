@@ -311,9 +311,14 @@ export function selection() {
 }
 
 // follow runs update on every change of sel while el is in the document,
-// and unsubscribes once a redraw has removed el.
+// and unsubscribes once a redraw has removed el. Pages render synchronously
+// and are inserted right away, so el counts as shown after the current task
+// even if the selection does not change while it is on screen.
 function follow(sel, el, update) {
   let shown = false;
+  queueMicrotask(() => {
+    if (el.isConnected) shown = true;
+  });
   const off = sel.onChange(() => {
     if (el.isConnected) {
       shown = true;
@@ -382,9 +387,12 @@ export function selectBox(sel, id, name) {
  * rows matching the current search. It is ticked when all of them are
  * selected and shows a dash when only some are.
  *
+ * The box follows changes of the selection; call its refresh() after the
+ * list behind ids() changes, for example when a filter is applied.
+ *
  * @param {Selection} sel
  * @param {() => Array<string|number>} ids
- * @returns {HTMLInputElement}
+ * @returns {HTMLInputElement & {refresh: () => void}}
  */
 export function selectAllBox(sel, ids) {
   const box = h('input', {
@@ -410,6 +418,7 @@ export function selectAllBox(sel, ids) {
   };
   update();
   follow(sel, box, update);
+  box.refresh = update;
   return box;
 }
 

@@ -183,10 +183,19 @@ async function logout() {
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
 
+// SCROLLERS are the scrolling areas whose position a redraw keeps: the list
+// while the page stays, the detail and single-page content while the page
+// and the selected item stay.
+const SCROLLERS = [['.list-body', false], ['.detail-pane', true], ['.content', true]];
+
 function renderShell() {
   const r = state.route;
-  const oldList = $app.querySelector('.list-body');
-  const keepScroll = oldList && $app.dataset.page === r.page ? oldList.scrollTop : 0;
+  const samePage = $app.dataset.page === r.page;
+  const sameItem = samePage && $app.dataset.id === r.id;
+  const kept = SCROLLERS.map(([sel, perItem]) => {
+    const el = $app.querySelector(sel);
+    return el && (perItem ? sameItem : samePage) ? el.scrollTop : 0;
+  });
 
   const app = h('div', { class: 'app' },
     renderSidebar(),
@@ -194,10 +203,13 @@ function renderShell() {
     h('main', { class: 'main' }, renderTopbar(), PAGES.get(r.page).render(r)));
   $app.className = '';
   $app.dataset.page = r.page;
+  $app.dataset.id = r.id;
   $app.replaceChildren(app);
 
-  const newList = $app.querySelector('.list-body');
-  if (newList && keepScroll) newList.scrollTop = keepScroll;
+  SCROLLERS.forEach(([sel], i) => {
+    const el = $app.querySelector(sel);
+    if (el && kept[i]) el.scrollTop = kept[i];
+  });
 }
 
 function setNav(open) {
