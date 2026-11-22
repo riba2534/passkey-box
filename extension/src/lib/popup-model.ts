@@ -73,10 +73,12 @@ export function groupCredentials(credentials: Credential[], hostname: string, qu
   return { current, all };
 }
 
-/** URL opened by "打开网站": the registration origin, else https://<rp_id>. */
+/**
+ * URL opened by "打开网站": the registration origin when it is an http(s) page on rp_id or a subdomain of it,
+ * else https://<rp_id>. Another user wrote the origin of a shared passkey, so it must not lead to another site.
+ */
 export function siteUrl(c: Pick<Credential, "origin" | "rp_id">): string {
-  if (c.origin && /^https?:\/\//i.test(c.origin)) return c.origin;
-  return `https://${c.rp_id}`;
+  return hostMatchesRpId(tabHostname(c.origin), c.rp_id) ? c.origin : `https://${c.rp_id}`;
 }
 
 function pad(n: number): string {
