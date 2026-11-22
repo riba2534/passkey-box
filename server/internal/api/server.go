@@ -19,7 +19,7 @@ import (
 const (
 	sessionCookie   = "pkb_session"
 	sessionLifetime = 30 * 24 * time.Hour
-	maxBodyBytes    = 1 << 20
+	maxBodyBytes    = 4 << 20 // 50 fields of 10000 characters, in any script, fit
 	extensionPath   = "/downloads/passkey-box-extension.zip"
 	extensionName   = "passkey-box-extension.zip"
 )
