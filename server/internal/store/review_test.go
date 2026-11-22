@@ -210,3 +210,33 @@ func TestSnapshotIsAsPrivateAsTheDatabase(t *testing.T) {
 		t.Fatalf("snapshot mode = %v, %v", fi.Mode(), err)
 	}
 }
+
+// otpauth parameter names fold ASCII letters only, like the console and the
+// extension: "DİGITS" (U+0130) is not "digits" anywhere.
+func TestOtpauthParameterNamesFoldASCIIOnly(t *testing.T) {
+	const base = "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP"
+	if msg := checkTOTP(base + "&D%C4%B0GITS=9"); msg != "" {
+		t.Fatalf("a non-ASCII parameter name was read as digits: %s", msg)
+	}
+	if msg := checkTOTP(base + "&DIGITS=9"); msg == "" {
+		t.Fatal("DIGITS=9 accepted")
+	}
+}
+
+// A hand-edited fields value must not break the lists that contain it.
+func TestUnreadableFieldsDoNotBreakLists(t *testing.T) {
+	f := newFixture(t, "alice", "root")
+	ctx := t.Context()
+	f.save("alice", "YQ", "a.com", "MQ", 0)
+	f.save("alice", "Yg", "b.com", "Mg", 0)
+	for _, bad := range []string{"", "{}", `"x"`, "not json", "[1]"} {
+		mustExec(t, f.s.db, `UPDATE credentials SET fields = ? WHERE id = 'YQ'`, bad)
+		creds, err := f.s.ListCredentials(ctx, f.users["alice"].ID, "")
+		if err != nil || len(creds) != 2 {
+			t.Fatalf("fields %q: list = %d, %v", bad, len(creds), err)
+		}
+		if _, _, err := f.s.ListAllCredentials(ctx, CredentialFilter{Query: "x", Limit: 10}); err != nil {
+			t.Fatalf("fields %q: admin search = %v", bad, err)
+		}
+	}
+}

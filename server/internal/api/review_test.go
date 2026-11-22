@@ -217,3 +217,42 @@ func TestLabelLengthIsCapped(t *testing.T) {
 	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1000)}).expect(http.StatusOK)
 	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1001)}).expectError(http.StatusBadRequest, "invalid_request")
 }
+
+func TestOnlyCredentialUpdatesTakeLargeBodies(t *testing.T) {
+	e := newEnv(t, func(o *api.Options) { o.AllowRegister = true })
+	big := `{"username":"` + strings.Repeat("x", 2<<20) + `","password":"pw"}`
+	e.anon().do("POST", "/api/v1/auth/login", big).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+	e.anon().do("POST", "/api/v1/auth/register", big).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+}
+
+func TestRegisteredLabelIsCapped(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	cred := newCred("YQ", "a.com", "YQ")
+	cred["label"] = strings.Repeat("备", 1001)
+	c.do("POST", "/api/v1/credentials", cred).expectError(http.StatusBadRequest, "invalid_request")
+	cred["label"] = strings.Repeat("备", 1000)
+	c.do("POST", "/api/v1/credentials", cred).expect(http.StatusCreated)
+}
+
+// A shared passkey carries its owner's fields: a link field must not hide
+// where it goes behind bidirectional formatting.
+func TestLinkFieldsRefuseMisleadingCharacters(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	for _, f := range []map[string]string{
+		{"type": "url", "value": "https://evil.example/‮moc.buhtig"},
+		{"type": "email", "value": "alice‏@github.com"},
+		{"type": "phone", "value": "+1⁦555"},
+		{"type": "url", "value": "https://a.com/\x07"},
+	} {
+		c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{f}}).expectError(http.StatusBadRequest, "invalid_request")
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{
+		map[string]string{"type": "text", "value": "שלום ‮"},
+		map[string]string{"type": "url", "value": "https://例子.测试/路径"},
+	}}).expect(http.StatusOK)
+}

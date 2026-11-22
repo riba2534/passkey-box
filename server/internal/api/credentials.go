@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/riba2534/passkey-box/server/internal/store"
 )
@@ -60,6 +62,8 @@ func (c *credentialRequest) validate() string {
 		return "sign_count must not be negative"
 	case c.Origin != "" && !isHTTPURL(c.Origin):
 		return "origin must be an http or https URL"
+	case utf8.RuneCountInString(c.Label) > store.MaxCredentialNameLen:
+		return fmt.Sprintf("label must be at most %d characters", store.MaxCredentialNameLen)
 	}
 	return ""
 }
@@ -153,7 +157,7 @@ func readCredentialUpdate(w http.ResponseWriter, r *http.Request) (store.Credent
 		UserDisplayName *string        `json:"user_display_name"`
 		Fields          *[]store.Field `json:"fields"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSONLimit(w, r, &req, maxCredentialUpdateBytes) {
 		return store.CredentialUpdate{}, false
 	}
 	return store.CredentialUpdate(req), true

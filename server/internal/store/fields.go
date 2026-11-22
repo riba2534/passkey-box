@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -95,8 +96,39 @@ func checkField(f Field) string {
 		}
 	case f.Type == "totp":
 		return checkTOTP(f.Value)
+	case (f.Type == "url" || f.Type == "email" || f.Type == "phone") && strings.IndexFunc(f.Value, misleadingRune) >= 0:
+		// Shared passkeys carry other users' fields: a link must read as
+		// what it opens.
+		return "value must not contain control or bidirectional formatting characters"
 	}
 	return ""
+}
+
+// misleadingRune reports control characters and Unicode bidirectional
+// formatting characters, which can make a link's text differ from where it
+// goes.
+func misleadingRune(r rune) bool {
+	switch {
+	case unicode.IsControl(r):
+		return true
+	case r == '\u061c' || r == '\u200e' || r == '\u200f':
+		return true
+	case r >= '\u202a' && r <= '\u202e', r >= '\u2066' && r <= '\u2069':
+		return true
+	}
+	return false
+}
+
+// asciiLower lower-cases ASCII letters only. otpauth parameter names are
+// case-insensitive by ASCII rules alone, as in the console and the extension:
+// Go and JavaScript fold other letters (U+0130) differently.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
 
 var base32Pattern = regexp.MustCompile(`^[A-Za-z2-7]+$`)
@@ -149,7 +181,7 @@ func checkTOTP(v string) string {
 		if err1 != nil || err2 != nil {
 			return "invalid otpauth URI query"
 		}
-		name = strings.ToLower(name)
+		name = asciiLower(name)
 		if _, seen := params[name]; !seen {
 			params[name] = value
 		}

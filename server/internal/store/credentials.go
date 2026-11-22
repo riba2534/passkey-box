@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
@@ -129,7 +129,11 @@ func scanCredential(r rowScanner, trailing ...any) (Credential, error) {
 	c.CreatedAt = fromMillis(created)
 	c.LastUsedAt = fromNullMillis(lastUsed)
 	if err := json.Unmarshal([]byte(fields), &c.Fields); err != nil {
-		return Credential{}, fmt.Errorf("fields of credential %s: %w", c.ID, err)
+		// Only a hand-edited database holds such a value. Keep the passkey
+		// usable (old extensions sign in through these lists) rather than
+		// failing every list that contains it.
+		log.Printf("ignoring the unreadable fields of credential %s: %v", c.ID, err)
+		c.Fields = nil
 	}
 	if c.Fields == nil {
 		c.Fields = []Field{}
@@ -343,7 +347,8 @@ func (s *Store) ListAllCredentials(ctx context.Context, f CredentialFilter) ([]C
 		q := strings.ToLower(f.Query)
 		add(`(instr(lower(c.rp_id), ?) OR instr(lower(c.rp_name), ?) OR instr(lower(c.user_name), ?)
 			OR instr(lower(c.user_display_name), ?) OR instr(lower(c.label), ?) OR instr(o.username_key, ?)
-			OR EXISTS (SELECT 1 FROM json_each(c.fields) WHERE instr(lower(json_extract(value, '$.label')), ?)))`,
+			OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(c.fields) AND json_type(c.fields) = 'array' THEN c.fields ELSE '[]' END)
+				WHERE json_type(value) = 'object' AND instr(lower(json_extract(value, '$.label')), ?)))`,
 			q, q, q, q, q, q, q)
 	}
 	if f.Shared != nil {
