@@ -505,9 +505,12 @@ function updateChanges(d) {
     const unnamed = list.filter((l) => !l).length;
     parts.push(verb + (named ? '字段' + named : '') + (unnamed ? `${named ? '和' : ''} ${unnamed} 个未命名字段` : ''));
   };
+  const before = parts.length;
   fields('添加了', f.added);
   fields('修改了', f.changed);
   fields('删除了', f.removed);
+  // A fields change with nothing added, changed or removed is a new order.
+  if (d.fields && parts.length === before) parts.push('调整了字段的顺序');
   return parts;
 }
 
