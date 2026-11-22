@@ -218,7 +218,7 @@ test('removing a shared passkey in the popup only leaves the share; the owner ke
 
   await inProfile(stack, b, headless, async (bob) => {
     const popup = await bob.context.newPage();
-    await popup.goto(`chrome-extension://${new URL(bob.extension.worker.url()).host}/popup.html`);
+    await popup.goto(bob.extension.popupUrl);
     const row = popup.locator(`[data-credential-id="${alice.id}"]`);
     if (labels) await expect(row.locator('.item-owner')).toHaveText('共享自 e2e-user-a');
     await row.click();

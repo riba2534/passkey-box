@@ -29,7 +29,7 @@ PKB_E2E_EXTENSION_DIR=/tmp/ext-e2e/v050/extension/dist npx playwright test --pro
 git worktree remove /tmp/ext-e2e/v050
 ```
 
-用例用 `extensionSince(stack, '<版本>')` 按这个目录里 `manifest.json` 的版本判断扩展有哪些界面，只在版本够新时断言新界面的文案：`sharing.spec.ts` 对 0.6.0 起才有的「共享自 …」标签、「所有者」和「移除共享」这样处理，旧版扩展照样跑登录、共享、转移和退出共享的流程（旧版弹窗的「删除」对共享来的凭据同样只是退出共享）。不设置这个变量时测试的是 `extension/` 的当前代码，无论它的版本号是多少。
+用例用 `extensionSince(stack, '<版本>')` 按这个目录里 `manifest.json` 的版本判断扩展有哪些界面，只在版本够新时断言新界面的文案：`sharing.spec.ts` 对 0.6.0 起才有的「共享自 …」标签、「所有者」和「移除共享」这样处理，旧版扩展照样跑登录、共享、转移和退出共享的流程（旧版弹窗的「删除」对共享来的凭据同样只是退出共享）；`fields.spec.ts` 只对 0.7.0 起的扩展断言弹窗里的自定义字段，旧版扩展拿到带 `fields` 的凭据也要照常登录、打开详情。不设置这个变量时测试的是 `extension/` 的当前代码，无论它的版本号是多少。
 
 ## 结构
 
