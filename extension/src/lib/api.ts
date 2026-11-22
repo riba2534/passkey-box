@@ -33,6 +33,18 @@ export interface Credential {
   /** "shared": another user shared it with the caller. */
   access?: "owner" | "shared";
   shared_at?: string | null;
+  /** Since 0.7.0, in the order the owner arranged them; older servers omit it. */
+  fields?: Field[];
+}
+
+export type FieldType = "text" | "password" | "url" | "email" | "phone" | "date" | "multiline" | "totp";
+
+/** A custom field the owner added to a credential; `value` of a "totp" field is a base32 secret or otpauth:// URI. */
+export interface Field {
+  id: string;
+  label: string;
+  type: FieldType;
+  value: string;
 }
 
 /** The owner's username when another user shared `c` with the caller, else undefined. */

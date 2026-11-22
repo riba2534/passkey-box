@@ -1,6 +1,6 @@
 // Pure helpers behind the popup's credential list and detail views.
 
-import { sharedBy, type Credential } from "./api";
+import { sharedBy, type Credential, type Field, type FieldType } from "./api";
 import { hostMatchesRpId } from "./rpid";
 
 export function credentialTitle(c: Pick<Credential, "rp_name" | "rp_id">): string {
@@ -29,6 +29,55 @@ export function detailFields(c: Credential): Array<[string, string]> {
     ["创建时间", formatTime(c.created_at, "—")],
     ["最近使用", formatTime(c.last_used_at)],
   ];
+}
+
+/** The custom fields shown under the details; servers before 0.7.0 send none. */
+export function customFields(c: Pick<Credential, "fields">): Field[] {
+  return c.fields ?? [];
+}
+
+const FIELD_TYPE_NAMES: Record<FieldType, string> = {
+  text: "文本",
+  password: "密码",
+  url: "网址",
+  email: "邮箱",
+  phone: "电话",
+  date: "日期",
+  multiline: "多行文本",
+  totp: "一次性密码",
+};
+
+/** A field's label, or the name of its type when the label is empty. */
+export function fieldLabel(f: Pick<Field, "label" | "type">): string {
+  return f.label.trim() || (Object.hasOwn(FIELD_TYPE_NAMES, f.type) ? FIELD_TYPE_NAMES[f.type] : "字段");
+}
+
+const MASKED = "••••••••";
+
+/**
+ * A field's value as the detail view shows it, "—" when empty. A password stays masked until revealed and a
+ * TOTP secret always does: its row shows the current code instead.
+ */
+export function fieldText(f: Pick<Field, "type" | "value">, revealed = false): string {
+  if (!f.value) return "—";
+  return f.type === "totp" || (f.type === "password" && !revealed) ? MASKED : f.value;
+}
+
+/** The page a "url" field opens: only http(s) URLs are links, anything else is plain text. */
+export function fieldLink(f: Pick<Field, "type" | "value">): string | null {
+  if (f.type !== "url") return null;
+  try {
+    const u = new URL(f.value.trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "123 456": a one-time code in two groups, the longer one first. */
+export function groupCode(code: string): string {
+  const half = Math.ceil(code.length / 2);
+  return `${code.slice(0, half)} ${code.slice(half)}`;
 }
 
 export interface RemoveAction {
