@@ -235,12 +235,6 @@ func updateUser(ctx context.Context, q queryer, actor Actor, user User, u UserUp
 		Action: "user.update", Subject: &subject, Detail: map[string]any{"changes": changes}})
 }
 
-// ownedCredential is a credential being handed over with its owner's account.
-type ownedCredential struct {
-	seq int64
-	AuditCredential
-}
-
 // deleteUser removes user and records user.delete. With a recipient, the
 // user's credentials are first transferred to it (one credential.transfer
 // each): their other shares stay, and the recipient's own shares of them are
@@ -255,22 +249,13 @@ func deleteUser(ctx context.Context, q queryer, actor Actor, user User, recipien
 	if recipient != nil {
 		b := recipient.Brief()
 		target = &b
-		creds, err := queryRows(ctx, q, func(r rowScanner) (ownedCredential, error) {
-			var c ownedCredential
-			return c, r.Scan(&c.seq, &c.ID, &c.RPID, &c.UserName)
-		}, `SELECT seq, id, rp_id, user_name FROM credentials WHERE user_id = ? ORDER BY seq`, user.ID)
+		creds, err := queryRows(ctx, q, func(r rowScanner) (Credential, error) { return scanCredential(r) },
+			`SELECT `+credentialColumns+credentialsFrom+` WHERE c.user_id = ? ORDER BY c.seq`, user.ID)
 		if err != nil {
 			return DeletedUser{}, err
 		}
 		for _, c := range creds {
-			if _, err := q.ExecContext(ctx, `DELETE FROM credential_shares WHERE credential_seq = ? AND user_id = ?`, c.seq, recipient.ID); err != nil {
-				return DeletedUser{}, err
-			}
-			if _, err := q.ExecContext(ctx, `UPDATE credentials SET user_id = ? WHERE seq = ?`, recipient.ID, c.seq); err != nil {
-				return DeletedUser{}, err
-			}
-			if err := writeAudit(ctx, q, now, actor, AuditEntry{Action: "credential.transfer", Subject: &subject, Target: target,
-				Credential: &c.AuditCredential, Detail: map[string]any{"keep_access": false}}); err != nil {
+			if _, err := transferCredential(ctx, q, actor, c, b, false, now); err != nil {
 				return DeletedUser{}, err
 			}
 		}
