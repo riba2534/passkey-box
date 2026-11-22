@@ -265,7 +265,7 @@
 
 ### `GET /api/v1/me/activity`
 
-与我有关（我是执行人、受影响的用户或另一方）的操作日志：200 `{"events": [AuditEvent], "next_before": 41}`，新的在前。查询参数 `limit`（默认 50，最大 200）、`before`（只返回 ID 小于它的事件，用上一页的 `next_before` 翻页；没有更多时 `next_before` 为 `null`）。
+与我有关（我是执行人、受影响的用户或另一方）的操作日志：200 `{"events": [AuditEvent], "next_before": 41}`，新的在前。查询参数 `limit`（默认 50，范围 1–200，越界返回 400）、`before`（只返回 ID 小于它的事件，用上一页的 `next_before` 翻页；没有更多时 `next_before` 为 `null`）。
 
 ### `GET /api/v1/users`
 
@@ -434,9 +434,9 @@
 | `rp_id` | 网站，大小写不敏感精确匹配 |
 | `q` | 在 `rp_id`、`rp_name`、`user_name`、`user_display_name`、`label` 和主人用户名里做大小写不敏感的子串匹配 |
 | `shared` | `true` 只看有共享的，`false` 只看没有共享的 |
-| `limit` / `offset` | 分页，`limit` 默认 100、最大 500 |
+| `limit` / `offset` | 分页，`limit` 默认 100、范围 1–500，`offset` 默认 0 |
 
-引用的用户不存在时返回空列表。
+引用的用户不存在时返回空列表。参数越界或格式不对（`limit` 超出范围、ID 不是数字、`shared` 不是 `true`/`false`）返回 400。
 
 ## 服务端配置（环境变量）
 
