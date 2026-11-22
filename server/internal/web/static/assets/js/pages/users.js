@@ -4,7 +4,7 @@
 
 import {
   state, h, icon, iconButton, api, errText, toast, toastError, renderShell, go, refreshMe, sessionEnded,
-  openModal, confirmDialog, chooseDialog, confirmDelete, formDialog, copyText, siteAvatar, userAvatar, credTitle, credAccount,
+  openModal, confirmDialog, chooseDialog, formDialog, copyText, siteAvatar, userAvatar, credTitle, credAccount,
   fmtDate, fmtDateTime, emptyState, loading, field, formRow, usernameError, roleText,
   lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
 } from '../core.js';
@@ -434,8 +434,13 @@ async function createUsers(lines) {
   if (rows.some((r) => r.password)) passwordsDialog('已创建的用户', rows);
 }
 
+// csvCell writes one CSV field. A field a spreadsheet would run as a
+// formula (starting with =, +, -, @, a tab or a carriage return) gets a
+// leading apostrophe and quotes.
 function csvCell(s) {
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const formula = /^[=+\-@\t\r]/.test(s);
+  const v = formula ? `'${s}` : s;
+  return formula || /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
 function passwordsCSV(rows) {
@@ -640,16 +645,28 @@ async function credAction(action, c) {
   await refreshUsers();
 }
 
+// revokeShare stops sharing c with u through the unshare batch, never
+// DELETE /admin/users/{id}/credentials/{cid}: had c been transferred to u
+// in the meantime, that would delete the passkey itself.
 async function revokeShare(u, c) {
-  const done = await confirmDelete({
+  const ok = await confirmDialog({
     title: '撤销这条共享？',
     message: `${u.username} 将不能再从服务器拉取 ${c.rp_id} 上的账号“${credAccount(c)}”。撤销只能阻止以后再拉取，TA 可能已经留存了私钥。`,
     confirmText: '撤销共享',
-  }, `/admin/users/${u.id}/credentials/${encodeURIComponent(c.id)}`);
-  if (!done) return;
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const out = await api('POST', '/admin/credentials/unshare', { ids: [c.id], users: [u.id] });
+    if (out.results.some((r) => r.status === 'unshared')) toast('已撤销共享');
+    else toast(`${u.username} 已经不是这个通行密钥的被共享人（共享可能刚被撤销，或通行密钥已转移给 TA），已刷新`, 'error');
+  } catch (err) {
+    if (sessionEnded(err)) return;
+    if (err.items) toast('这个通行密钥或用户已经不存在了，已刷新', 'error');
+    else toastError(err);
+  }
   if (u.id === state.me.id || c.owner.id === state.me.id) state.creds = null;
   forgetCredentials();
-  toast('已撤销共享');
   await refreshUsers();
 }
 
