@@ -502,7 +502,8 @@ export function eventText(event, meId) {
     case 'credential.leave':
       return say(actor, '退出了', subject, '共享的', cred);
     case 'credential.transfer':
-      return say(actor, '把', owned, '转移给了', target, d.keep_access ? ['，', say(whose, '仍可使用')] : '');
+      // The old owner by name: "自己" would read as the new owner here.
+      return say(actor, '把', owned, '转移给了', target, d.keep_access ? ['，', say(subject, '仍可使用')] : '');
     case 'token.create':
       return say(actor, self ? '' : ['为', subject], '创建了', d.read_only ? '只读' : '', 'API 令牌', `「${d.name}」`);
     case 'token.revoke':
