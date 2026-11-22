@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -58,7 +57,7 @@ func normalizeFields(fields []Field, newID func() string) ([]Field, error) {
 	for i, f := range fields {
 		f.Label = strings.TrimSpace(f.Label)
 		if f.Type == "date" || f.Type == "totp" {
-			f.Value = strings.TrimSpace(f.Value)
+			f.Value = strings.Trim(f.Value, asciiSpace)
 		}
 		if msg := checkField(f); msg != "" {
 			return nil, Invalid("fields[%d]: %s", i, msg)
@@ -100,7 +99,13 @@ func checkField(f Field) string {
 	return ""
 }
 
-var base32Pattern = regexp.MustCompile(`^[A-Z2-7]+$`)
+var base32Pattern = regexp.MustCompile(`^[A-Za-z2-7]+$`)
+
+// asciiSpace is the only white space TOTP values may contain. The console and
+// the extension strip exactly these characters too; Go's unicode.IsSpace and
+// JavaScript's \s disagree on others (U+0085, U+FEFF), which would let the
+// server accept a secret no client can turn into a code.
+const asciiSpace = " \t\n\r\f\v"
 
 // validBase32 reports whether s is a TOTP secret by the rules the web console
 // and the extension share: case-insensitive, ignoring white space and "-",
@@ -109,12 +114,12 @@ var base32Pattern = regexp.MustCompile(`^[A-Z2-7]+$`)
 // decoder would silently drop their last characters. Every other string of
 // base32 characters decodes to at least one byte.
 func validBase32(s string) bool {
-	s = strings.ToUpper(strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) || r == '-' {
+	s = strings.Map(func(r rune) rune {
+		if r == '-' || strings.ContainsRune(asciiSpace, r) {
 			return -1
 		}
 		return r
-	}, s))
+	}, s)
 	s = strings.TrimRight(s, "=")
 	return base32Pattern.MatchString(s) && !slices.Contains([]int{1, 3, 6}, len(s)%8)
 }

@@ -6,7 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"io"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,9 +20,12 @@ import (
 const (
 	sessionCookie   = "pkb_session"
 	sessionLifetime = 30 * 24 * time.Hour
-	maxBodyBytes    = 4 << 20 // 50 fields of 10000 characters, in any script, fit
-	extensionPath   = "/downloads/passkey-box-extension.zip"
-	extensionName   = "passkey-box-extension.zip"
+	// maxBodyBytes fits the largest valid request: 50 fields of 10000
+	// characters each, even with every character JSON-escaped as a surrogate
+	// pair (12 bytes).
+	maxBodyBytes  = 8 << 20
+	extensionPath = "/downloads/passkey-box-extension.zip"
+	extensionName = "passkey-box-extension.zip"
 )
 
 // Options configures a Server.
@@ -232,8 +236,14 @@ func (s *Server) handleExtensionDownload(w http.ResponseWriter, r *http.Request)
 // readJSON reads a single JSON value from the request body into v. On failure
 // it answers 400 and returns false.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes))
-	if dec.Decode(v) != nil || dec.More() {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	err := dec.Decode(v)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "invalid_request", fmt.Sprintf("request body exceeds %d bytes", maxBodyBytes))
+		return false
+	}
+	if err != nil || dec.More() {
 		badRequest(w, "invalid JSON body")
 		return false
 	}

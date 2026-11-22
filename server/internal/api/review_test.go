@@ -184,3 +184,36 @@ func TestLargestFieldsListFitsInARequest(t *testing.T) {
 	}
 	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": fields}).expect(http.StatusOK)
 }
+
+// Clients such as Python's json.dumps escape every non-ASCII character; the
+// largest valid fields list must still fit, and a body over the limit gets a
+// clear 413 instead of "invalid JSON body".
+func TestRequestBodyLimit(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	value := strings.Repeat(`\ud83d\ude00`, 10000) // one emoji per character, escaped as a surrogate pair (12 bytes)
+	var b strings.Builder
+	b.WriteString(`{"fields":[`)
+	for i := range 50 {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"label":"x","type":"multiline","value":"` + value + `"}`)
+	}
+	b.WriteString(`]}`)
+	c.do("PATCH", "/api/v1/credentials/YQ", b.String()).expect(http.StatusOK)
+
+	r := c.do("PATCH", "/api/v1/credentials/YQ", `{"label":"`+strings.Repeat("x", 9<<20)+`"}`)
+	r.expectError(http.StatusRequestEntityTooLarge, "invalid_request")
+}
+
+func TestLabelLengthIsCapped(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1000)}).expect(http.StatusOK)
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]string{"label": strings.Repeat("备", 1001)}).expectError(http.StatusBadRequest, "invalid_request")
+}

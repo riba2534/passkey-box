@@ -549,8 +549,9 @@ func TestSaveCredentialKeepsWhatTheUserMade(t *testing.T) {
 	}
 }
 
-// Transfers can leave a user with two credentials for one account; the newest
-// by creation time, then by insertion, is the one whose edits are kept.
+// Transfers can leave a user with two credentials for one account. The newest
+// by creation time, then by insertion, gives the label and names; the fields
+// of all of them are kept, newest first.
 func TestSaveCredentialKeepsTheNewestReplaced(t *testing.T) {
 	f := newFixture(t, "alice", "bob")
 	ctx := t.Context()
@@ -563,12 +564,12 @@ func TestSaveCredentialKeepsTheNewestReplaced(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		bobAt, aliceAt time.Duration
-		want           string
+		want, older    string
 	}{
 		// bob's credential is inserted first but created later.
-		{5 * time.Hour, time.Hour, "bob's"},
+		{5 * time.Hour, time.Hour, "bob's", "alice's"},
 		// Created at the same time: the later insertion wins.
-		{time.Hour, time.Hour, "alice's"},
+		{time.Hour, time.Hour, "alice's", "bob's"},
 	} {
 		handle := fmt.Sprintf("h%d", tc.bobAt)
 		f.save("bob", "b"+handle, "a.com", handle, tc.bobAt)
@@ -579,7 +580,7 @@ func TestSaveCredentialKeepsTheNewestReplaced(t *testing.T) {
 			t.Fatal(err)
 		}
 		c := f.save("alice", "n"+handle, "a.com", handle, 6*time.Hour)
-		if c.Label != tc.want || c.UserName != tc.want || len(c.Fields) != 1 || c.Fields[0].Label != tc.want {
+		if c.Label != tc.want || c.UserName != tc.want || len(c.Fields) != 2 || c.Fields[0].Label != tc.want || c.Fields[1].Label != tc.older {
 			t.Errorf("bob at %v, alice at %v: kept %+v, want %s", tc.bobAt, tc.aliceAt, c, tc.want)
 		}
 		for _, id := range []string{"a" + handle, "b" + handle} {

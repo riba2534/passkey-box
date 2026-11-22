@@ -378,22 +378,26 @@ var errCredentialIDTaken = &conflictError{"credential id already exists"}
 // account, together with their shares: a new private key reaches nobody until
 // the owner shares it again. (Moving the shares would let a credential someone
 // else transferred in with keep_access, or a revoked recipient, receive the
-// owner's next key.) What the user made of the newest replaced credential
-// stays: its label unless c has one, its fields, and the names the user
-// edited, which take the place of those on c. If the ID is still taken by
-// another credential, nothing changes and ErrConflict is returned. Statistics
-// and fields on c are ignored.
+// owner's next key.) What the user made of the replaced credentials stays:
+// the fields of all of them, newest first (a transfer can leave several for
+// one account), and, from the newest, its label unless c has one and the names
+// the user edited, which take the place of those on c. If the ID is still
+// taken by another credential, nothing changes and ErrConflict is returned.
+// Statistics and fields on c are ignored.
 func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c Credential, now time.Time) (Credential, error) {
 	var saved Credential
 	err := s.inTx(ctx, false, func(tx *sql.Tx) error {
 		rpKey := strings.ToLower(c.RPID)
+		replaced, err := queryRows(ctx, tx, func(r rowScanner) (Credential, error) { return scanCredential(r) },
+			`SELECT `+credentialColumns+credentialsFrom+` WHERE c.user_id = ? AND c.rp_id_key = ? AND c.user_handle = ?
+			ORDER BY c.created_at DESC, c.seq DESC`, userID, rpKey, c.UserHandle)
+		if err != nil {
+			return err
+		}
 		var prev Credential
-		fields := "[]"
-		err := tx.QueryRowContext(ctx, `SELECT label, rp_name, user_name, user_display_name, fields, edited FROM credentials
-			WHERE user_id = ? AND rp_id_key = ? AND user_handle = ? ORDER BY created_at DESC, seq DESC LIMIT 1`,
-			userID, rpKey, c.UserHandle).Scan(&prev.Label, &prev.RPName, &prev.UserName, &prev.UserDisplayName, &fields, &prev.edited)
-		switch {
-		case err == nil:
+		kept := []Field{}
+		if len(replaced) > 0 {
+			prev = replaced[0]
 			if c.Label == "" {
 				c.Label = prev.Label
 			}
@@ -402,7 +406,18 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 					*c.names()[i] = *prev.names()[i]
 				}
 			}
-		case !errors.Is(err, sql.ErrNoRows):
+			seen := map[string]bool{}
+			for _, r := range replaced {
+				for _, f := range r.Fields {
+					if !seen[f.ID] {
+						seen[f.ID] = true
+						kept = append(kept, f)
+					}
+				}
+			}
+		}
+		fields, err := json.Marshal(kept)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -424,7 +439,7 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 			 private_key, public_key, sign_count, label, origin, created_at, last_used_at, use_count, fields, edited)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)`,
 			userID, c.ID, c.RPID, rpKey, c.RPName, c.UserHandle, c.UserName, c.UserDisplayName, c.Alg,
-			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now), fields, prev.edited)
+			c.PrivateKey, c.PublicKey, c.SignCount, c.Label, c.Origin, toMillis(now), string(fields), prev.edited)
 		if err != nil {
 			return err
 		}
@@ -442,7 +457,7 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 }
 
 // MaxCredentialNameLen is the maximum length in characters of an edited
-// rp_name, user_name or user_display_name after trimming.
+// rp_name, user_name or user_display_name after trimming, and of a label.
 const MaxCredentialNameLen = 1000
 
 // CredentialUpdate changes a credential; nil fields are left as they are and
@@ -466,6 +481,9 @@ func (u *CredentialUpdate) names() []**string {
 func (u CredentialUpdate) normalize(newID func() string) (CredentialUpdate, error) {
 	if u.Label == nil && u.Fields == nil && !slices.ContainsFunc(u.names(), func(p **string) bool { return *p != nil }) {
 		return u, Invalid("nothing to update")
+	}
+	if u.Label != nil && utf8.RuneCountInString(*u.Label) > MaxCredentialNameLen {
+		return u, Invalid("label must be at most %d characters", MaxCredentialNameLen)
 	}
 	for i, p := range u.names() {
 		if *p == nil {

@@ -114,7 +114,7 @@ func TestBase32Secrets(t *testing.T) {
 		"JBSWY3DPEHPK3PXP",
 		"jbswy3dpehpk3pxp",
 		"jbsw y3dp-ehpk 3pxp",
-		"JBSW\tY3DP\nEHPK Y3DP",
+		"JBSW\tY3DP\nEHPK\vY3DP\f\r",
 		"GE",
 		"GE======",
 		"GE=",
@@ -137,6 +137,12 @@ func TestBase32Secrets(t *testing.T) {
 		"GEZDGN",      // 6 mod 8
 		"GEZDGNBVGEZ", // 11 = 3 mod 8
 		"GE=ZDG",      // = inside
+		// Only ASCII white space is ignored: Go and JavaScript disagree on
+		// the others, so a client could not turn these into codes.
+		"JBSWY3DP\u0085EHPK3PXP",
+		"\ufeffJBSWY3DPEHPK3PXP",
+		"JBSW\u00a0Y3DP",
+		"JBSWY3DPEHPK3PXß",
 		"=GE",
 		"GEZDGNBV1",
 		"GEZDGNB8",
