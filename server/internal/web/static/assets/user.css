@@ -1,1 +1,102 @@
 /* Styles for the user pages: passkeys, activity and agent. */
+
+/* ---------- Shared ---------- */
+
+/* A section title with a button on the right. */
+.user-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0 0 8px;
+}
+.user-section-head .section-title { margin: 0 0 0 2px; }
+
+/* Badges with user-supplied text: long text is cut short, the full text is
+   in the title. */
+.badge.trunc {
+  display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 12em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px;
+}
+
+/* ---------- 我的通行密钥 ---------- */
+
+.pk-select-all { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
+.pk-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.pk-list-pane .selection-bar { margin-top: 10px; }
+.pk-list-pane .list-item { gap: 10px; }
+.pk-list-pane .list-item .select-box { margin-left: 2px; }
+
+.pk-detail .detail-subtitle .pk-rp { min-width: 0; overflow-wrap: anywhere; }
+.pk-detail .danger-zone { flex-wrap: wrap; gap: 8px; }
+.pk-note { margin: -12px 2px 20px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.pk-share-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
+.pk-share-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: #FFF8E6; color: #7A5300; font-size: 12px;
+}
+.pk-share-note .icon { width: 16px; height: 16px; margin-top: 1px; }
+.transfer-keep { margin-top: 12px; }
+
+/* ---------- 我的动态 ---------- */
+
+.activity-list { list-style: none; margin: 0 0 20px; padding: 0; }
+.activity-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.activity-item:first-child { border-top: 0; }
+.activity-icon {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: none;
+  border-radius: 50%;
+  background: var(--primary-soft); color: var(--primary);
+}
+.activity-icon .icon { width: 16px; height: 16px; }
+.activity-text { color: var(--text); overflow-wrap: anywhere; }
+.activity-more { display: flex; justify-content: center; margin-bottom: 20px; }
+
+/* ---------- Agent 接入 ---------- */
+
+.agent-facts { list-style: none; margin: 0; padding: 0; }
+.agent-fact {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.agent-fact:first-child { border-top: 0; }
+.agent-fact .icon { color: var(--primary); margin-top: 1px; }
+.agent-prompt {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 13px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.agent-token-icon {
+  display: grid; place-items: center;
+  width: 32px; height: 32px; flex: none;
+  border-radius: var(--radius);
+  background: var(--bg-hover); color: var(--text-2);
+}
+.agent-token-prefix { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.agent-token-meta { white-space: normal; }
+.agent-secret {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+}
+.agent-secret code {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  overflow-wrap: anywhere; user-select: all;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 680px) {
+  .pk-list-pane .list-tools { flex-wrap: wrap; }
+  .pk-list-pane .select-box { width: 20px; height: 20px; }
+}

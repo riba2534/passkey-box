@@ -6,7 +6,7 @@ export default {
   id: 'settings',
   title: '账户设置',
   icon: 'sliders',
-  // Refresh the account so its passkey count is current.
+  // Refresh the account so its passkey counts are current.
   load: () => refreshMe(),
   render: renderSettingsPage,
 };
@@ -43,6 +43,8 @@ function renderSettingsPage() {
       field('用户名', me.username),
       field('角色', roleText(me)),
       field('通行密钥', `${me.credential_count} 个`),
+      field('共享给我的', `${me.shared_in_count} 个`),
+      field('我共享出去的', `${me.shared_out_count} 个`),
       field('创建时间', fmtDateTime(me.created_at))),
     h('h3', { class: 'section-title' }, '修改密码'),
     h('form', { class: 'card form-card', onsubmit: onSubmit, novalidate: true },
