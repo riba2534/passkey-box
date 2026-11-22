@@ -56,6 +56,44 @@
 .activity-text { color: var(--text); overflow-wrap: anywhere; }
 .activity-more { display: flex; justify-content: center; margin-bottom: 20px; }
 
+/* ---------- Agent 接入 ---------- */
+
+.agent-facts { list-style: none; margin: 0; padding: 0; }
+.agent-fact {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.agent-fact:first-child { border-top: 0; }
+.agent-fact .icon { color: var(--primary); margin-top: 1px; }
+.agent-prompt {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 13px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.agent-token-icon {
+  display: grid; place-items: center;
+  width: 32px; height: 32px; flex: none;
+  border-radius: var(--radius);
+  background: var(--bg-hover); color: var(--text-2);
+}
+.agent-token-prefix { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.agent-token-meta { white-space: normal; }
+.agent-secret {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+}
+.agent-secret code {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  overflow-wrap: anywhere; user-select: all;
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 680px) {
