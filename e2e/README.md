@@ -18,18 +18,31 @@ npx playwright test --list                    # 列出用例
 
 `--headed` 可以看到浏览器窗口。设置 `PKB_E2E_CHROMIUM` 可用指定的 Chromium 可执行文件替代 Playwright 自带版本，测试仍会使用独立的临时 Profile。
 
+### 用旧版扩展测试新服务端
+
+已安装的旧版扩展不会自动升级，新服务端必须继续支持它们。设置 `PKB_E2E_EXTENSION_DIR` 为一个已经构建好的扩展解压目录时，准备步骤不再构建 `extension/`，直接加载这个目录（服务端照常从当前代码构建）：
+
+```bash
+git worktree add --detach /tmp/ext-e2e/v050 v0.5.0
+(cd /tmp/ext-e2e/v050/extension && npm ci && npm run build)
+PKB_E2E_EXTENSION_DIR=/tmp/ext-e2e/v050/extension/dist npx playwright test --project=extension
+git worktree remove /tmp/ext-e2e/v050
+```
+
+用例用 `extensionSince(stack, '<版本>')` 按这个目录里 `manifest.json` 的版本判断扩展有哪些界面，只在版本够新时断言新界面的文案：`sharing.spec.ts` 对 0.6.0 起才有的「共享自 …」标签、「所有者」和「移除共享」这样处理，旧版扩展照样跑登录、共享、转移和退出共享的流程（旧版弹窗的「删除」对共享来的凭据同样只是退出共享）。不设置这个变量时测试的是 `extension/` 的当前代码，无论它的版本号是多少。
+
 ## 结构
 
 | 路径 | 作用 |
 |---|---|
 | `rp/server.ts` | 测试 RP：Node HTTP 服务 + `@simplewebauthn/server`，内存存储，`http://localhost:18422`，rpId `localhost` |
 | `rp/public/` | RP 页面；元素约定见 `index.html` 注释，结果字符串见 `client.js` 开头 |
-| `tests/setup/` | 准备与收尾（Playwright 项目依赖）：`rp.setup` 启动 RP；`stack.setup` 构建服务端与扩展、用临时数据库启动服务端、用管理员接口创建测试账号 `e2e-user-a` / `e2e-user-b`；对应的 teardown 按 PID 停进程、删临时目录 |
+| `tests/setup/` | 准备与收尾（Playwright 项目依赖）：`rp.setup` 启动 RP；`stack.setup` 构建服务端与扩展、用临时数据库启动服务端、用管理员 `e2e-admin` 创建测试账号 `e2e-user-a` / `e2e-user-b`；对应的 teardown 按 PID 停进程、删临时目录 |
 | `tests/rp-harness.spec.ts` | RP 冒烟用例，只用 CDP 虚拟认证器 |
 | `tests/extension/` | 扩展 + 服务端用例 |
 | `support/` | 端口与路径、进程管理、服务端 API 客户端、RP 页面对象、扩展 fixture、虚拟认证器 |
 
-扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并清空两个测试账号在服务端的凭据。模拟多个浏览器 Profile 的用例用 `launchProfile` 和 `extensionIn` 另开独立上下文；预置账号的用例（`managed.spec.ts`）像 AnyBrowser 那样为每个上下文复制一份扩展并写入 `managed-config.json`。
+扩展 fixture 每个用例都新建一个持久化 Chromium 上下文（`channel: 'chromium'`，headless shell 不能加载扩展），从扩展 service worker 写 `chrome.storage.local` 的 `pkb_config` / `pkb_settings` 完成配置，扩展登录后即可签名，不需要其他设置。网站测试页可挂上 CDP 虚拟认证器，供原生回退用例使用，也用来确认请求没有落到浏览器原生实现。每个用例开始前重置 RP，并用管理员接口删除服务端的全部凭据（共享和转移会让凭据跨账号，所以不按账号逐个删）。模拟多个浏览器 Profile 或多个用户的用例用 `openProfile` 另开独立上下文（`sharing.spec.ts` 里 A、B 两个用户各用一个 Profile）；预置账号的用例（`managed.spec.ts`）像 AnyBrowser 那样为每个上下文复制一份扩展并写入 `managed-config.json`。
 
 ## RP 页面约定
 

@@ -6,6 +6,8 @@ export const REPO_ROOT = path.resolve(E2E_DIR, '..');
 export const SERVER_DIR = path.join(REPO_ROOT, 'server');
 export const EXTENSION_DIR = path.join(REPO_ROOT, 'extension');
 export const EXTENSION_DIST = path.join(EXTENSION_DIR, 'dist');
+/** An already built unpacked extension to load instead of building extension/, e.g. an older release. */
+export const PREBUILT_EXTENSION_DIR = process.env.PKB_E2E_EXTENSION_DIR ? path.resolve(process.env.PKB_E2E_EXTENSION_DIR) : undefined;
 export const CHROMIUM_EXECUTABLE_PATH = process.env.PKB_E2E_CHROMIUM || undefined;
 
 /** Everything the suite writes at runtime lives under here (never inside the repo). */

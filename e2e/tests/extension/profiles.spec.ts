@@ -1,20 +1,4 @@
-import type { BrowserContext } from '@playwright/test';
-import type { Account } from '../../support/pkb-api.ts';
-import { expect, extensionIn, launchProfile, PkbUi, test } from '../../support/extension-fixtures.ts';
-import { RpPage } from '../../support/rp.ts';
-import type { StackState } from '../../support/stack.ts';
-
-type Profile = { context: BrowserContext; rp: RpPage; ui: PkbUi };
-
-/** Another browser profile signed in to the same Passkey Box account, on the test RP. */
-async function openProfile(stack: StackState, account: Account, headless: boolean): Promise<Profile> {
-  const context = await launchProfile(stack, headless);
-  await (await extensionIn(context, stack)).configure(account);
-  const page = context.pages()[0] ?? (await context.newPage());
-  const rp = new RpPage(page);
-  await rp.goto();
-  return { context, rp, ui: new PkbUi(page) };
-}
+import { expect, openProfile, test } from '../../support/extension-fixtures.ts';
 
 // Browser profiles that share one Passkey Box account (as in AnyBrowser) each sign in with the
 // account they registered, without choosing; a profile that used none of them still asks.
