@@ -2,9 +2,12 @@ package api_test
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -130,11 +133,12 @@ func TestExtensionDownload(t *testing.T) {
 func TestWebConsole(t *testing.T) {
 	e := newEnv(t)
 	r := e.anon().do("GET", "/", nil).expect(http.StatusOK)
-	if !strings.HasPrefix(r.header.Get("Content-Type"), "text/html") || !strings.Contains(string(r.body), "/assets/app.js") {
+	const entry = `<script type="module" src="/assets/js/main.js">`
+	if !strings.HasPrefix(r.header.Get("Content-Type"), "text/html") || !strings.Contains(string(r.body), entry) {
 		t.Fatalf("index: %s %s", r.header.Get("Content-Type"), r.body)
 	}
 	for _, p := range []string{
-		"/assets/app.js", "/assets/app.css", "/assets/manifest.json", "/assets/logo-128.png",
+		"/assets/app.css", "/assets/admin.css", "/assets/user.css", "/assets/manifest.json", "/assets/logo-128.png",
 		"/assets/favicon.ico", "/assets/favicon-32.png", "/assets/apple-touch-icon.png",
 		"/assets/icon-192.png", "/assets/icon-512.png", "/assets/icon-maskable-512.png",
 	} {
@@ -142,10 +146,55 @@ func TestWebConsole(t *testing.T) {
 	}
 	// Every asset the page and the manifest point at must exist.
 	index := string(r.body)
-	for _, p := range []string{"/assets/favicon.ico", "/assets/favicon-32.png", "/assets/apple-touch-icon.png", "/assets/manifest.json"} {
+	for _, p := range []string{
+		"/assets/favicon.ico", "/assets/favicon-32.png", "/assets/apple-touch-icon.png", "/assets/manifest.json",
+		"/assets/app.css", "/assets/admin.css", "/assets/user.css",
+	} {
 		if !strings.Contains(index, p) {
 			t.Errorf("index.html does not reference %s", p)
 		}
+	}
+
+	// Follow the imports from the entry module: each must load as JavaScript
+	// (browsers refuse modules with another type), and every file under
+	// assets/js must be reachable, so a missing or orphaned module fails here.
+	importRE := regexp.MustCompile(`\bfrom\s*['"](\.{1,2}/[^'"]+)['"]`)
+	modules := map[string]bool{}
+	queue := []string{"/assets/js/main.js"}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		if modules[p] {
+			continue
+		}
+		modules[p] = true
+		m := e.anon().do("GET", p, nil)
+		if m.status != http.StatusOK {
+			t.Errorf("GET %s: status = %d", p, m.status)
+			continue
+		}
+		if ct := m.header.Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
+			t.Errorf("%s: Content-Type = %q", p, ct)
+		}
+		for _, imp := range importRE.FindAllStringSubmatch(string(m.body), -1) {
+			queue = append(queue, path.Join(path.Dir(p), imp[1]))
+		}
+	}
+	err := filepath.WalkDir("../web/static/assets/js", func(file string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel("../web/static", file)
+		if err != nil {
+			return err
+		}
+		if p := "/" + filepath.ToSlash(rel); !modules[p] {
+			t.Errorf("%s is not imported by any module", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	fav := e.anon().do("GET", "/favicon.ico", nil).expect(http.StatusOK)
 	if !bytes.Equal(fav.body[:4], []byte{0, 0, 1, 0}) {
