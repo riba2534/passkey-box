@@ -35,7 +35,7 @@ func validPassword(w http.ResponseWriter, password string) bool {
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request, actor store.Actor, u store.NewUser) (store.User, bool) {
 	user, err := s.opts.Store.CreateUserAs(r.Context(), actor, u, s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return store.User{}, false
 	}
 	return user, true
@@ -130,9 +130,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, c 
 		s.internalError(w, err)
 		return
 	}
-	if _, err := s.opts.Store.UpdateUser(r.Context(), c.actor(), user.ID, store.UserUpdate{Password: &req.NewPassword}, s.opts.Now()); err != nil {
-		s.writeUserError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	_, err = s.opts.Store.UpdateUser(r.Context(), c.actor(), user.ID, store.UserUpdate{Password: &req.NewPassword}, s.opts.Now())
+	s.writeNoContent(w, err, userNotFound)
 }

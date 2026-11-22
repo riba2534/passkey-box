@@ -327,6 +327,8 @@ func (s *Store) ListAllCredentials(ctx context.Context, f CredentialFilter) ([]C
 	return creds, total, loadShares(ctx, s.db, creds)
 }
 
+var errCredentialIDTaken = &conflictError{"credential id already exists"}
+
 // SaveCredential stores a new credential for the user. Credentials the user
 // owns with the same rp_id (case-insensitive) and user_handle are replaced, the
 // way an authenticator overwrites a discoverable credential for the same
@@ -361,7 +363,7 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 		// IDs are unique across all users (schema 1).
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM credentials WHERE id = ?`, c.ID).Scan(&exists)
 		if err == nil {
-			return ErrConflict
+			return errCredentialIDTaken
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err

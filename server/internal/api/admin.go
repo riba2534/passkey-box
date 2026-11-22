@@ -13,16 +13,6 @@ func userNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "user not found")
 }
 
-// writeUserError answers a failed user store call like writeStoreError,
-// naming the username in conflicts.
-func (s *Server) writeUserError(w http.ResponseWriter, err error) {
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "username already exists")
-		return
-	}
-	s.writeStoreError(w, err, userNotFound)
-}
-
 // targetUser loads the user named by the {user_id} path value. It writes the
 // error response and returns false when the user cannot be loaded.
 func (s *Server) targetUser(w http.ResponseWriter, r *http.Request) (store.User, bool) {
@@ -119,7 +109,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, c
 	}
 	res, err := s.opts.Store.UpdateUser(r.Context(), c.actor(), target.ID, store.UserUpdate(req), s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": newAdminUserView(res.User)})
@@ -130,11 +120,7 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, c
 	if !ok {
 		return
 	}
-	if err := s.opts.Store.DeleteUser(r.Context(), c.actor(), target.ID, s.opts.Now()); err != nil {
-		s.writeUserError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.writeNoContent(w, s.opts.Store.DeleteUser(r.Context(), c.actor(), target.ID, s.opts.Now()), userNotFound)
 }
 
 func (s *Server) handleAdminRevokeSessions(w http.ResponseWriter, r *http.Request, c *caller) {
@@ -144,7 +130,7 @@ func (s *Server) handleAdminRevokeSessions(w http.ResponseWriter, r *http.Reques
 	}
 	sessions, tokens, err := s.opts.Store.RevokeAccess(r.Context(), c.actor(), target.ID, s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"sessions": sessions, "tokens": tokens})

@@ -70,7 +70,7 @@ func (s *Server) handleAdminBatchCreateUsers(w http.ResponseWriter, r *http.Requ
 	}
 	created, err := s.opts.Store.CreateUsers(r.Context(), c.actor(), users, req.DryRun, s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return
 	}
 	type result struct {
@@ -115,7 +115,7 @@ func (s *Server) handleAdminBatchUpdateUsers(w http.ResponseWriter, r *http.Requ
 	}
 	updated, err := s.opts.Store.UpdateUsers(r.Context(), c.actor(), edits, req.DryRun, s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return
 	}
 	type result struct {
@@ -145,7 +145,7 @@ func (s *Server) handleAdminBatchDeleteUsers(w http.ResponseWriter, r *http.Requ
 	}
 	deleted, err := s.opts.Store.DeleteUsers(r.Context(), c.actor(), userKeys(req.Users), recipient, req.DryRun, s.opts.Now())
 	if err != nil {
-		s.writeUserError(w, err)
+		s.writeStoreError(w, err, userNotFound)
 		return
 	}
 	type result struct {

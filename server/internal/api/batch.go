@@ -66,28 +66,43 @@ func checkBatchSize(w http.ResponseWriter, field string, n, limit int) bool {
 	return true
 }
 
+// codeStatus is the HTTP status of each store error code but not_found.
+var codeStatus = map[string]int{
+	store.CodeForbidden: http.StatusForbidden,
+	store.CodeConflict:  http.StatusConflict,
+	store.CodeInvalid:   http.StatusBadRequest,
+}
+
 // writeStoreError answers a failed store call: a *store.BatchError becomes
-// 400 with the failed items; ErrNotFound uses notFound; ErrForbidden 403,
-// ErrConflict 409, *store.InvalidError 400; anything else 500.
+// 400 with the failed items, ErrNotFound uses notFound, the other errors
+// store.Classify knows get their code and message, and anything else is 500.
 func (s *Server) writeStoreError(w http.ResponseWriter, err error, notFound func(http.ResponseWriter)) {
 	var batch *store.BatchError
-	var invalid *store.InvalidError
 	switch {
 	case errors.As(err, &batch):
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: errorDetail{
-			Code:    "invalid_request",
+			Code:    store.CodeInvalid,
 			Message: fmt.Sprintf("%d items failed", len(batch.Items)),
 			Items:   batch.Items,
 		}})
+		return
 	case errors.Is(err, store.ErrNotFound):
 		notFound(w)
-	case errors.Is(err, store.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "only the owner can do this")
-	case errors.Is(err, store.ErrConflict):
-		writeError(w, http.StatusConflict, "conflict", "already exists")
-	case errors.As(err, &invalid):
-		badRequest(w, invalid.Reason)
-	default:
-		s.internalError(w, err)
+		return
 	}
+	code, message, ok := store.Classify(err, "")
+	if !ok {
+		s.internalError(w, err)
+		return
+	}
+	writeError(w, codeStatus[code], code, message)
+}
+
+// writeNoContent answers 204 on success and like writeStoreError otherwise.
+func (s *Server) writeNoContent(w http.ResponseWriter, err error, notFound func(http.ResponseWriter)) {
+	if err != nil {
+		s.writeStoreError(w, err, notFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -93,9 +93,5 @@ func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request, c *ca
 		tokenNotFound(w)
 		return
 	}
-	if err := s.opts.Store.DeleteToken(r.Context(), c.actor(), c.User.ID, id, s.opts.Now()); err != nil {
-		s.writeStoreError(w, err, tokenNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.writeNoContent(w, s.opts.Store.DeleteToken(r.Context(), c.actor(), c.User.ID, id, s.opts.Now()), tokenNotFound)
 }

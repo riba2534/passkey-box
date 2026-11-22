@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -127,12 +126,8 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request, 
 		Label:           req.Label,
 		Origin:          req.Origin,
 	}, s.opts.Now())
-	if errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "credential id already exists")
-		return
-	}
 	if err != nil {
-		s.internalError(w, err)
+		s.writeStoreError(w, err, credentialNotFound)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"credential": newAccessCredentialView(cred, c.privateKeys(), false)})
@@ -188,16 +183,4 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request, 
 
 func credentialNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "credential not found")
-}
-
-// writeNoContent answers 204 on success, notFound on store.ErrNotFound and 500 otherwise.
-func (s *Server) writeNoContent(w http.ResponseWriter, err error, notFound func(http.ResponseWriter)) {
-	switch {
-	case err == nil:
-		w.WriteHeader(http.StatusNoContent)
-	case errors.Is(err, store.ErrNotFound):
-		notFound(w)
-	default:
-		s.internalError(w, err)
-	}
 }

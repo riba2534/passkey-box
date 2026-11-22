@@ -134,25 +134,42 @@ func (e *BatchError) Add(field string, index int, value any, code, message strin
 	e.Items = append(e.Items, ItemError{Field: field, Index: index, Value: value, Code: code, Message: message})
 }
 
-// AddErr records a failed entry from a store error: ErrNotFound, ErrForbidden,
-// ErrConflict and *InvalidError map to their codes with notFound used as the
-// not-found message. Any other error is returned unchanged so the caller can
-// abort; nil is returned when err was recorded.
+// AddErr records a failed entry from a store error classified by Classify,
+// with notFound as the not-found message. Any other error is returned
+// unchanged so the caller can abort; nil is returned when err was recorded.
 func (e *BatchError) AddErr(field string, index int, value any, err error, notFound string) error {
+	code, message, ok := Classify(err, notFound)
+	if !ok {
+		return err
+	}
+	e.Add(field, index, value, code, message)
+	return nil
+}
+
+// conflictError is ErrConflict with the message clients see.
+type conflictError struct{ message string }
+
+func (e *conflictError) Error() string        { return e.message }
+func (e *conflictError) Is(target error) bool { return target == ErrConflict }
+
+// Classify returns the code and message of an error the store reports to
+// clients, the same for batch items and single requests: ErrNotFound with
+// notFound as message, ErrForbidden, the conflicts and *InvalidError. ok is
+// false for any other error.
+func Classify(err error, notFound string) (code, message string, ok bool) {
+	var conflict *conflictError
 	var inv *InvalidError
 	switch {
 	case errors.Is(err, ErrNotFound):
-		e.Add(field, index, value, CodeNotFound, notFound)
+		return CodeNotFound, notFound, true
 	case errors.Is(err, ErrForbidden):
-		e.Add(field, index, value, CodeForbidden, "only the owner can do this")
-	case errors.Is(err, ErrConflict):
-		e.Add(field, index, value, CodeConflict, "already exists")
+		return CodeForbidden, "only the owner can do this", true
+	case errors.As(err, &conflict):
+		return CodeConflict, conflict.message, true
 	case errors.As(err, &inv):
-		e.Add(field, index, value, CodeInvalid, inv.Reason)
-	default:
-		return err
+		return CodeInvalid, inv.Reason, true
 	}
-	return nil
+	return "", "", false
 }
 
 // Err returns e when it holds failed entries, or nil.

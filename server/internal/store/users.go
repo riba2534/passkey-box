@@ -56,6 +56,7 @@ var (
 	errDemoteSelf      = Invalid("you cannot remove your own administrator role")
 	errDisableSelf     = Invalid("you cannot disable yourself")
 	errDeleteSelf      = Invalid("you cannot delete yourself")
+	errUsernameTaken   = &conflictError{"username already exists"}
 )
 
 // value is the key as the client sent it, for batch error items.
@@ -64,16 +65,6 @@ func (k UserKey) value() any {
 		return k.ID
 	}
 	return k.Username
-}
-
-// addUserErr records a failed user entry like BatchError.AddErr, naming the
-// username in conflicts.
-func addUserErr(be *BatchError, field string, index int, value any, err error) error {
-	if errors.Is(err, ErrConflict) {
-		be.Add(field, index, value, CodeConflict, "username already exists")
-		return nil
-	}
-	return be.AddErr(field, index, value, err, "user not found")
 }
 
 // withPasswords runs fn with the bcrypt hashes of passwords ("" stays "").
@@ -114,14 +105,14 @@ func (s *Store) withPasswords(ctx context.Context, dryRun bool, passwords []stri
 	return run(false)
 }
 
-// usernameTaken returns ErrConflict when a user other than except has the
-// username key.
+// usernameTaken returns errUsernameTaken, an ErrConflict, when a user other
+// than except has the username key.
 func usernameTaken(ctx context.Context, q queryer, key string, except int64) error {
 	var id int64
 	err := q.QueryRowContext(ctx, `SELECT id FROM users WHERE username_key = ? AND id != ?`, key, except).Scan(&id)
 	switch {
 	case err == nil:
-		return ErrConflict
+		return errUsernameTaken
 	case errors.Is(err, sql.ErrNoRows):
 		return nil
 	default:
@@ -337,7 +328,7 @@ func (s *Store) CreateUsers(ctx context.Context, actor Actor, users []NewUser, d
 		for i, u := range users {
 			user, err := insertUser(ctx, tx, actor, u, hashes[i], now)
 			if err != nil {
-				if err := addUserErr(&be, "users", i, u.Username, err); err != nil {
+				if err := be.AddErr("users", i, u.Username, err, "user not found"); err != nil {
 					return err
 				}
 				continue
@@ -374,7 +365,7 @@ func (s *Store) UpdateUsers(ctx context.Context, actor Actor, edits []UserEdit, 
 				res, err = updateUser(ctx, tx, actor, user, e.UserUpdate, hashes[i], now)
 			}
 			if err != nil {
-				if err := addUserErr(&be, "items", i, e.User.value(), err); err != nil {
+				if err := be.AddErr("items", i, e.User.value(), err, "user not found"); err != nil {
 					return err
 				}
 				continue
@@ -407,7 +398,7 @@ func (s *Store) DeleteUsers(ctx context.Context, actor Actor, keys []UserKey, re
 				err = errDeleteSelf
 			}
 			if err != nil {
-				if err := addUserErr(&be, "users", i, k.value(), err); err != nil {
+				if err := be.AddErr("users", i, k.value(), err, "user not found"); err != nil {
 					return err
 				}
 				continue
@@ -426,7 +417,7 @@ func (s *Store) DeleteUsers(ctx context.Context, actor Actor, keys []UserKey, re
 				err = Invalid(warnUserDisabled)
 			}
 			if err != nil {
-				if err := addUserErr(&be, "transfer_credentials_to", 0, recipient.value(), err); err != nil {
+				if err := be.AddErr("transfer_credentials_to", 0, recipient.value(), err, "user not found"); err != nil {
 					return err
 				}
 			} else {
