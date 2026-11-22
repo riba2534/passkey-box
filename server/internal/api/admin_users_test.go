@@ -52,51 +52,6 @@ func usernames(users []adminUserJSON) []string {
 	return out
 }
 
-// item is a failed batch entry; JSON numbers decode as float64.
-type item struct {
-	Field   string `json:"field"`
-	Index   int    `json:"index"`
-	Value   any    `json:"value"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// expectItems checks a failed batch: 400 invalid_request with exactly these items.
-func (r *response) expectItems(want ...item) {
-	r.t.Helper()
-	r.expectError(http.StatusBadRequest, "invalid_request")
-	var body struct {
-		Error struct {
-			Items []item `json:"items"`
-		} `json:"error"`
-	}
-	r.decode(&body)
-	if !reflect.DeepEqual(body.Error.Items, want) {
-		r.t.Fatalf("items:\n got %+v\nwant %+v", body.Error.Items, want)
-	}
-}
-
-// expectPlainError checks a 400 for a malformed request: no items.
-func (r *response) expectPlainError() {
-	r.t.Helper()
-	r.expectError(http.StatusBadRequest, "invalid_request")
-	if strings.Contains(string(r.body), `"items"`) {
-		r.t.Fatalf("malformed request answered with items: %s", r.body)
-	}
-}
-
-func (e *env) events(f store.AuditFilter) []store.AuditEvent {
-	e.t.Helper()
-	if f.Limit == 0 {
-		f.Limit = 100
-	}
-	ev, err := e.store.ListAudit(e.t.Context(), f)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	return ev
-}
-
 func TestAdminGetAndUpdateUser(t *testing.T) {
 	e := newEnv(t)
 	root := e.createUser("root", "pw", true)

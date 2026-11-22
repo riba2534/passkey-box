@@ -18,11 +18,7 @@ func newFixture(t *testing.T, names ...string) *fixture {
 	t.Helper()
 	f := &fixture{t: t, s: openTest(t), users: map[string]User{}}
 	for _, n := range names {
-		u, err := f.s.CreateUser(t.Context(), n, "pw", n == "root", t0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		f.users[n] = u
+		f.users[n] = mustUser(t, f.s, n, n == "root")
 	}
 	return f
 }

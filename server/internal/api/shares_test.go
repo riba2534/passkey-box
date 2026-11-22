@@ -46,11 +46,7 @@ func (w *world) shareWith(owner, id string, users ...string) {
 
 func (w *world) audit(action string) []store.AuditEvent {
 	w.t.Helper()
-	ev, err := w.store.ListAudit(w.t.Context(), store.AuditFilter{Action: action, Limit: 1000})
-	if err != nil {
-		w.t.Fatal(err)
-	}
-	return ev
+	return w.events(store.AuditFilter{Action: action, Limit: 1000})
 }
 
 type briefJSON struct {
@@ -110,51 +106,6 @@ func summary(results []resultJSON) []string {
 		}
 	}
 	return out
-}
-
-type itemJSON struct {
-	Field   string `json:"field"`
-	Index   int    `json:"index"`
-	Value   any    `json:"value"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-func (it itemJSON) String() string {
-	return fmt.Sprintf("%s[%d]=%v:%s", it.Field, it.Index, it.Value, it.Code)
-}
-
-// items checks a failed batch (400 with items) and returns them rendered as
-// "field[index]=value:code".
-func (r *response) items() []string {
-	r.t.Helper()
-	r.expectError(http.StatusBadRequest, "invalid_request")
-	var body struct {
-		Error struct {
-			Items []itemJSON `json:"items"`
-		} `json:"error"`
-	}
-	r.decode(&body)
-	if len(body.Error.Items) == 0 {
-		r.t.Fatalf("no items in %s", r.body)
-	}
-	var out []string
-	for _, it := range body.Error.Items {
-		if it.Message == "" {
-			r.t.Fatalf("item without a message: %s", r.body)
-		}
-		out = append(out, it.String())
-	}
-	return out
-}
-
-// plainBadRequest checks a 400 invalid_request without items.
-func (r *response) plainBadRequest() {
-	r.t.Helper()
-	r.expectError(http.StatusBadRequest, "invalid_request")
-	if strings.Contains(string(r.body), `"items"`) {
-		r.t.Fatalf("plain 400 with items: %s", r.body)
-	}
 }
 
 func listIDs(c *client, path string) []string {
@@ -491,7 +442,7 @@ func TestBatchRequestValidation(t *testing.T) {
 		}
 		for name, tc := range cases {
 			t.Run(prefix+name, func(t *testing.T) {
-				client.do("POST", prefix+tc.path, tc.body).plainBadRequest()
+				client.do("POST", prefix+tc.path, tc.body).expectPlainError()
 			})
 		}
 	}

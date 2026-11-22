@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -301,4 +304,79 @@ func sessionCookieFrom(r *response) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+// item is a failed batch entry; JSON numbers decode as float64.
+type item struct {
+	Field   string `json:"field"`
+	Index   int    `json:"index"`
+	Value   any    `json:"value"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func (it item) String() string {
+	return fmt.Sprintf("%s[%d]=%v:%s", it.Field, it.Index, it.Value, it.Code)
+}
+
+// failedItems checks a failed batch: 400 invalid_request with its items.
+func (r *response) failedItems() []item {
+	r.t.Helper()
+	r.expectError(http.StatusBadRequest, "invalid_request")
+	var body struct {
+		Error struct {
+			Items []item `json:"items"`
+		} `json:"error"`
+	}
+	r.decode(&body)
+	return body.Error.Items
+}
+
+// expectItems checks a failed batch: 400 invalid_request with exactly these items.
+func (r *response) expectItems(want ...item) {
+	r.t.Helper()
+	if got := r.failedItems(); !reflect.DeepEqual(got, want) {
+		r.t.Fatalf("items:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// items checks a failed batch (400 with items) and returns them rendered as
+// "field[index]=value:code".
+func (r *response) items() []string {
+	r.t.Helper()
+	got := r.failedItems()
+	if len(got) == 0 {
+		r.t.Fatalf("no items in %s", r.body)
+	}
+	var out []string
+	for _, it := range got {
+		if it.Message == "" {
+			r.t.Fatalf("item without a message: %s", r.body)
+		}
+		out = append(out, it.String())
+	}
+	return out
+}
+
+// expectPlainError checks a 400 for a malformed request: no items.
+func (r *response) expectPlainError() {
+	r.t.Helper()
+	r.expectError(http.StatusBadRequest, "invalid_request")
+	if strings.Contains(string(r.body), `"items"`) {
+		r.t.Fatalf("malformed request answered with items: %s", r.body)
+	}
+}
+
+// events returns the matching audit events, at most 100 unless f.Limit says
+// otherwise.
+func (e *env) events(f store.AuditFilter) []store.AuditEvent {
+	e.t.Helper()
+	if f.Limit == 0 {
+		f.Limit = 100
+	}
+	ev, err := e.store.ListAudit(e.t.Context(), f)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return ev
 }
