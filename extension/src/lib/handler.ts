@@ -1,6 +1,6 @@
 // Background request handling: decides what to do with a page's create/get call.
 
-import { describeError, type Credential, type NewCredential } from "./api";
+import { describeError, sharedBy, type Credential, type NewCredential } from "./api";
 import { ALG_ES256, ALG_RS256, createAssertion, createRegistration, type CoseAlgorithm } from "./authenticator";
 import { isHttpOrigin } from "./caller";
 import type { Config, Settings } from "./config";
@@ -40,7 +40,16 @@ const MSG_ALG = "None of the requested public key algorithms are supported. Pass
 const ABORTED = { action: "reject", name: "NotAllowedError", message: "请求已取消。" } as const;
 
 function summarize(c: Credential, owned: OwnedCredentials): CandidateSummary {
-  return { id: c.id, user_name: c.user_name, user_display_name: c.user_display_name, rp_id: c.rp_id, owned: owned.has(c.id) };
+  const summary: CandidateSummary = {
+    id: c.id,
+    user_name: c.user_name,
+    user_display_name: c.user_display_name,
+    rp_id: c.rp_id,
+    owned: owned.has(c.id),
+  };
+  const by = sharedBy(c);
+  if (by !== undefined) summary.shared_by = by;
+  return summary;
 }
 
 export async function handleRequest(req: BackgroundRequest, deps: HandlerDeps): Promise<BackgroundResponse> {

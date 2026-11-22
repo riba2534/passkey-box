@@ -90,6 +90,8 @@ export interface CandidateSummary {
   rp_id: string;
   /** Registered or used in this browser profile. */
   owned?: boolean;
+  /** Username of the owner, when another user shared this passkey with the signed-in user. */
+  shared_by?: string;
 }
 
 export type ToastKind = "signed-in" | "saved" | "exists";

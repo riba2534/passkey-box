@@ -28,6 +28,16 @@ export interface Credential {
   created_at: string;
   last_used_at: string | null;
   use_count: number;
+  // Since 0.6.0; older servers omit them and every credential is the caller's own.
+  owner?: { id: number; username: string };
+  /** "shared": another user shared it with the caller. */
+  access?: "owner" | "shared";
+  shared_at?: string | null;
+}
+
+/** The owner's username when another user shared `c` with the caller, else undefined. */
+export function sharedBy(c: Pick<Credential, "access" | "owner">): string | undefined {
+  return c.access === "shared" ? c.owner?.username : undefined;
 }
 
 export interface NewCredential {
