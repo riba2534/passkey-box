@@ -37,6 +37,25 @@
 .pk-share-note .icon { width: 16px; height: 16px; margin-top: 1px; }
 .transfer-keep { margin-top: 12px; }
 
+/* ---------- 我的动态 ---------- */
+
+.activity-list { list-style: none; margin: 0 0 20px; padding: 0; }
+.activity-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.activity-item:first-child { border-top: 0; }
+.activity-icon {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: none;
+  border-radius: 50%;
+  background: var(--primary-soft); color: var(--primary);
+}
+.activity-icon .icon { width: 16px; height: 16px; }
+.activity-text { color: var(--text); overflow-wrap: anywhere; }
+.activity-more { display: flex; justify-content: center; margin-bottom: 20px; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 680px) {
