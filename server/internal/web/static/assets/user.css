@@ -1,1 +1,45 @@
 /* Styles for the user pages: passkeys, activity and agent. */
+
+/* ---------- Shared ---------- */
+
+/* A section title with a button on the right. */
+.user-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0 0 8px;
+}
+.user-section-head .section-title { margin: 0 0 0 2px; }
+
+/* Badges with user-supplied text: long text is cut short, the full text is
+   in the title. */
+.badge.trunc {
+  display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 12em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px;
+}
+
+/* ---------- 我的通行密钥 ---------- */
+
+.pk-select-all { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
+.pk-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.pk-list-pane .selection-bar { margin-top: 10px; }
+.pk-list-pane .list-item { gap: 10px; }
+.pk-list-pane .list-item .select-box { margin-left: 2px; }
+
+.pk-detail .detail-subtitle .pk-rp { min-width: 0; overflow-wrap: anywhere; }
+.pk-detail .danger-zone { flex-wrap: wrap; gap: 8px; }
+.pk-note { margin: -12px 2px 20px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.pk-share-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
+.pk-share-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: #FFF8E6; color: #7A5300; font-size: 12px;
+}
+.pk-share-note .icon { width: 16px; height: 16px; margin-top: 1px; }
+.transfer-keep { margin-top: 12px; }
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 680px) {
+  .pk-list-pane .list-tools { flex-wrap: wrap; }
+  .pk-list-pane .select-box { width: 20px; height: 20px; }
+}
