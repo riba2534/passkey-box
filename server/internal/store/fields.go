@@ -57,8 +57,19 @@ func normalizeFields(fields []Field, newID func() string) ([]Field, error) {
 	taken := map[string]bool{}
 	for i, f := range fields {
 		f.Label = strings.TrimSpace(f.Label)
-		if f.Type == "date" || f.Type == "totp" {
+		switch f.Type {
+		case "date", "totp":
 			f.Value = strings.Trim(f.Value, asciiSpace)
+		case "url", "email", "phone":
+			// Copied phone numbers and addresses often carry invisible
+			// direction marks; dropping them also keeps a link's text from
+			// reading differently from where it goes.
+			f.Value = strings.Map(func(r rune) rune {
+				if bidiFormatting(r) {
+					return -1
+				}
+				return r
+			}, f.Value)
 		}
 		if msg := checkField(f); msg != "" {
 			return nil, Invalid("fields[%d]: %s", i, msg)
@@ -96,21 +107,16 @@ func checkField(f Field) string {
 		}
 	case f.Type == "totp":
 		return checkTOTP(f.Value)
-	case (f.Type == "url" || f.Type == "email" || f.Type == "phone") && strings.IndexFunc(f.Value, misleadingRune) >= 0:
-		// Shared passkeys carry other users' fields: a link must read as
-		// what it opens.
-		return "value must not contain control or bidirectional formatting characters"
+	case (f.Type == "url" || f.Type == "email" || f.Type == "phone") && strings.IndexFunc(f.Value, unicode.IsControl) >= 0:
+		return "value must not contain control characters"
 	}
 	return ""
 }
 
-// misleadingRune reports control characters and Unicode bidirectional
-// formatting characters, which can make a link's text differ from where it
-// goes.
-func misleadingRune(r rune) bool {
+// bidiFormatting reports Unicode bidirectional formatting characters, which
+// can make a link's text read differently from where it goes.
+func bidiFormatting(r rune) bool {
 	switch {
-	case unicode.IsControl(r):
-		return true
 	case r == '\u061c' || r == '\u200e' || r == '\u200f':
 		return true
 	case r >= '\u202a' && r <= '\u202e', r >= '\u2066' && r <= '\u2069':

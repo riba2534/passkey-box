@@ -237,22 +237,39 @@ func TestRegisteredLabelIsCapped(t *testing.T) {
 }
 
 // A shared passkey carries its owner's fields: a link field must not hide
-// where it goes behind bidirectional formatting.
-func TestLinkFieldsRefuseMisleadingCharacters(t *testing.T) {
+// where it goes behind bidirectional formatting. Such marks (common in copied
+// phone numbers) are dropped; control characters are refused.
+func TestLinkFieldsDropMisleadingCharacters(t *testing.T) {
 	e := newEnv(t)
 	e.createUser("alice", "pw", false)
 	c := e.basic("alice", "pw")
 	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
-	for _, f := range []map[string]string{
-		{"type": "url", "value": "https://evil.example/‮moc.buhtig"},
-		{"type": "email", "value": "alice‏@github.com"},
-		{"type": "phone", "value": "+1⁦555"},
-		{"type": "url", "value": "https://a.com/\x07"},
-	} {
-		c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{f}}).expectError(http.StatusBadRequest, "invalid_request")
+	var body struct {
+		Credential struct {
+			Fields []struct{ Type, Value string } `json:"fields"`
+		} `json:"credential"`
 	}
 	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{
-		map[string]string{"type": "text", "value": "שלום ‮"},
-		map[string]string{"type": "url", "value": "https://例子.测试/路径"},
-	}}).expect(http.StatusOK)
+		map[string]string{"type": "url", "value": "https://evil.example/\u202emoc.buhtig"},
+		map[string]string{"type": "email", "value": "alice\u200f@github.com"},
+		map[string]string{"type": "phone", "value": "\u202a+86 138 0000 0000\u202c"},
+		map[string]string{"type": "text", "value": "\u05e9\u202e"},
+		map[string]string{"type": "url", "value": "https://例子.测试/路径?q=1#x"},
+	}}).expect(http.StatusOK).decode(&body)
+	got := []string{}
+	for _, f := range body.Credential.Fields {
+		got = append(got, f.Value)
+	}
+	want := []string{"https://evil.example/moc.buhtig", "alice@github.com", "+86 138 0000 0000", "\u05e9\u202e", "https://例子.测试/路径?q=1#x"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("values = %q, want %q", got, want)
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": []any{
+		map[string]string{"type": "url", "value": "https://a.com/\x07"}}}).expectError(http.StatusBadRequest, "invalid_request")
+}
+
+func TestOversizedBodyAfterAValueIsStill413(t *testing.T) {
+	e := newEnv(t)
+	body := `{"username":"a","password":"b"}` + strings.Repeat(" ", 1<<20)
+	e.anon().do("POST", "/api/v1/auth/login", body).expectError(http.StatusRequestEntityTooLarge, "invalid_request")
 }

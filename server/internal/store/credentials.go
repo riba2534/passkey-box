@@ -348,7 +348,7 @@ func (s *Store) ListAllCredentials(ctx context.Context, f CredentialFilter) ([]C
 		add(`(instr(lower(c.rp_id), ?) OR instr(lower(c.rp_name), ?) OR instr(lower(c.user_name), ?)
 			OR instr(lower(c.user_display_name), ?) OR instr(lower(c.label), ?) OR instr(o.username_key, ?)
 			OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(c.fields) AND json_type(c.fields) = 'array' THEN c.fields ELSE '[]' END)
-				WHERE json_type(value) = 'object' AND instr(lower(json_extract(value, '$.label')), ?)))`,
+				WHERE type = 'object' AND instr(lower(json_extract(value, '$.label')), ?)))`,
 			q, q, q, q, q, q, q)
 	}
 	if f.Shared != nil {
@@ -411,13 +411,22 @@ func (s *Store) SaveCredential(ctx context.Context, actor Actor, userID int64, c
 					*c.names()[i] = *prev.names()[i]
 				}
 			}
-			seen := map[string]bool{}
+			// Clients may choose field IDs, so two credentials can use the
+			// same one for different fields: keep both under fresh IDs.
+			seen := map[string]Field{}
 			for _, r := range replaced {
 				for _, f := range r.Fields {
-					if !seen[f.ID] {
-						seen[f.ID] = true
-						kept = append(kept, f)
+					if prev, ok := seen[f.ID]; ok {
+						if prev == f {
+							continue
+						}
+						for ok {
+							f.ID = newFieldID()
+							_, ok = seen[f.ID]
+						}
 					}
+					seen[f.ID] = f
+					kept = append(kept, f)
 				}
 			}
 		}

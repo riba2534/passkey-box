@@ -225,7 +225,8 @@ curl -sS "$PKB_URL/api/v1/me" -H "$AUTH"
 - `label` 去掉首尾空白后最多 100 个字符，可以为空。
 - `type` 是 `text`、`password`、`url`、`email`、`phone`、`date`、`multiline`、`totp` 之一。
 - `value` 最多 10000 个字符。`date` 为空或 `YYYY-MM-DD`；`totp` 是 base32 密钥（如 `JBSWY3DPEHPK3PXP`，不区分大小写，空格和 `-` 会被忽略）或 `otpauth://totp/…?secret=…` 链接（可带 `issuer`、`algorithm`=`SHA1`/`SHA256`/`SHA512`、`digits`=6–8、`period`=1–300）。服务端不计算验证码。
-- 每条通行密钥最多 50 个字段。
+- 每次 PATCH 最多 50 个字段，label 最多 100 个字符，value 最多 10000 个字符；备注（`label`）和三个名称最多 1000 个字符。`url`、`email`、`phone` 不能含控制字符，其中的 Unicode 双向格式字符保存时会被去掉。
+- PATCH 凭据的请求体最大 8 MiB，其他接口 1 MiB，超过返回 413。
 
 **CredentialBrief**（批量结果里，不带 `fields`）：`{"id", "rp_id", "user_name", "owner": UserBrief}`。
 

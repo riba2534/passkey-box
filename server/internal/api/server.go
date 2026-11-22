@@ -3,11 +3,13 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -243,14 +245,20 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 // readJSONLimit is readJSON with a body of at most limit bytes; a larger body
 // answers 413.
 func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
-	err := dec.Decode(v)
+	// Read the whole body first: a body over the limit is 413 even when it
+	// starts with a complete JSON value.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		writeError(w, http.StatusRequestEntityTooLarge, "invalid_request", fmt.Sprintf("request body exceeds %d bytes", limit))
 		return false
 	}
-	if err != nil || dec.More() {
+	if err != nil {
+		badRequest(w, "invalid JSON body")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if dec.Decode(v) != nil || dec.More() {
 		badRequest(w, "invalid JSON body")
 		return false
 	}

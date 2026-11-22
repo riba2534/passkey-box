@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Start-up makes whoever holds PKB_ADMIN_USERNAME an administrator, so that
@@ -229,14 +230,45 @@ func TestUnreadableFieldsDoNotBreakLists(t *testing.T) {
 	ctx := t.Context()
 	f.save("alice", "YQ", "a.com", "MQ", 0)
 	f.save("alice", "Yg", "b.com", "Mg", 0)
-	for _, bad := range []string{"", "{}", `"x"`, "not json", "[1]"} {
+	for _, bad := range []string{"", "{}", `"x"`, "not json", "[1]", `["x"]`, `[1,"hit"]`} {
 		mustExec(t, f.s.db, `UPDATE credentials SET fields = ? WHERE id = 'YQ'`, bad)
 		creds, err := f.s.ListCredentials(ctx, f.users["alice"].ID, "")
 		if err != nil || len(creds) != 2 {
 			t.Fatalf("fields %q: list = %d, %v", bad, len(creds), err)
 		}
-		if _, _, err := f.s.ListAllCredentials(ctx, CredentialFilter{Query: "x", Limit: 10}); err != nil {
+		if _, _, err := f.s.ListAllCredentials(ctx, CredentialFilter{Query: "no-such-text", Limit: 10}); err != nil {
 			t.Fatalf("fields %q: admin search = %v", bad, err)
 		}
+	}
+}
+
+// Clients may pick field IDs: fields with the same ID but different content
+// on two replaced credentials are both kept.
+func TestReRegistrationKeepsFieldsSharingAnID(t *testing.T) {
+	f := newFixture(t, "alice", "bob")
+	ctx := t.Context()
+	set := func(owner, id, value string) {
+		t.Helper()
+		if _, err := f.s.UpdateCredential(ctx, f.actor(owner), f.users[owner].ID, id,
+			CredentialUpdate{Fields: &[]Field{{ID: "f0", Type: "text", Value: value}, {ID: "same", Type: "text", Value: "x"}}}, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.save("alice", "YQ", "a.com", "aA", 0)
+	set("alice", "YQ", "alice's")
+	f.save("bob", "Yg", "a.com", "aA", time.Hour)
+	set("bob", "Yg", "bob's")
+	if _, err := f.s.TransferCredentials(ctx, f.batch("bob", "Yg"), UserKey{Username: "alice"}, false); err != nil {
+		t.Fatal(err)
+	}
+	c := f.save("alice", "bmV3", "a.com", "aA", 2*time.Hour)
+	var values []string
+	ids := map[string]bool{}
+	for _, fl := range c.Fields {
+		values = append(values, fl.Value)
+		ids[fl.ID] = true
+	}
+	if strings.Join(values, ",") != "bob's,x,alice's" || len(ids) != 3 {
+		t.Fatalf("fields = %+v", c.Fields)
 	}
 }
