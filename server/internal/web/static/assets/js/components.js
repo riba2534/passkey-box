@@ -485,6 +485,31 @@ function say(...parts) {
   });
 }
 
+const UPDATED_NAMES = [['label', '备注'], ['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
+
+// updateChanges lists what a credential.update event changed, e.g.
+// "把网站名称改为「GitHub」" or "添加了字段「恢复码」". The detail names fields
+// by label only; their values are never in the audit log.
+function updateChanges(d) {
+  const parts = [];
+  for (const [key, name] of UPDATED_NAMES) {
+    const c = d[key];
+    if (c) parts.push(c.to ? `把${name}改为「${c.to}」` : `清除了${name}`);
+  }
+  const f = d.fields || {};
+  // "添加了字段「恢复码」、「PIN」和 1 个未命名字段"
+  const fields = (verb, list) => {
+    if (!list || !list.length) return;
+    const named = list.filter(Boolean).map((l) => `「${l}」`).join('、');
+    const unnamed = list.filter((l) => !l).length;
+    parts.push(verb + (named ? '字段' + named : '') + (unnamed ? `${named ? '和' : ''} ${unnamed} 个未命名字段` : ''));
+  };
+  fields('添加了', f.added);
+  fields('修改了', f.changed);
+  fields('删除了', f.removed);
+  return parts;
+}
+
 /**
  * eventText describes an AuditEvent in one Chinese sentence, e.g.
  * "admin 把 alice 的 github.com · alice@example.com 转移给了 bob".
@@ -529,10 +554,16 @@ export function eventText(event, meId) {
       return say(actor, '注销了', whose, `的全部登录（${d.sessions || 0} 个会话、${d.tokens || 0} 个 API 令牌）`);
     case 'credential.create':
       return say(actor, self ? '' : ['为', subject], '新建了通行密钥', cred);
-    case 'credential.update':
-      return d.label && d.label.to
-        ? say(actor, '把', owned, '的备注改为', `「${d.label.to}」`)
-        : say(actor, '清除了', owned, '的备注');
+    case 'credential.update': {
+      const changes = updateChanges(d);
+      // Events before 0.7.0 only change the label, and so do many since.
+      if (!changes.length || (changes.length === 1 && d.label)) {
+        return d.label && d.label.to
+          ? say(actor, '把', owned, '的备注改为', `「${d.label.to}」`)
+          : say(actor, '清除了', owned, '的备注');
+      }
+      return say(actor, '修改了', owned, '：', changes.join('，'));
+    }
     case 'credential.delete':
       return say(actor, '删除了', owned);
     case 'credential.share':
