@@ -4,11 +4,11 @@
 import {
   state, h, icon, iconButton, api, toast, toastError, go, confirmDialog, confirmDelete,
   siteAvatar, userAvatar, credTitle, credAccount, credBrief, fmtDateTime,
-  emptyState, loading, field, lastUsedShort, lastUsedField, copyAction, backButton, searchBox,
+  emptyState, loading, field, lastUsedShort, lastUsedField, backButton, searchBox,
 } from '../core.js';
 import {
   pickUsers, runBatch, selection, selectionBar, selectBox, selectAllBox, credentialBadges,
-  labelBadge, labelEditor, credentialTechInfo,
+  labelBadge, labelEditor, credentialTechInfo, credentialNames, credentialFields,
 } from '../components.js';
 
 const SHARE_WARNING = '共享即交出私钥：对方的插件会拿到这个通行密钥，可以直接用它登录。撤销只能阻止以后再拉取，不能保证对方没有留存。';
@@ -77,9 +77,12 @@ function titled(badges) {
   return badges;
 }
 
+// matchesCred searches the names, label, owner and field labels, but not
+// the field values.
 function matchesCred(c, q) {
   if (!q) return true;
-  return [c.rp_id, c.rp_name, c.user_name, c.user_display_name, c.label, c.origin, c.owner && c.owner.username]
+  return [c.rp_id, c.rp_name, c.user_name, c.user_display_name, c.label, c.origin, c.owner && c.owner.username,
+    ...(c.fields || []).map((f) => f.label)]
     .some((v) => (v || '').toLowerCase().includes(q));
 }
 
@@ -120,7 +123,7 @@ function renderPasskeysPage() {
   const listPane = h('section', { class: 'list-pane pk-list-pane', 'aria-label': '通行密钥列表' },
     h('div', { class: 'list-header' },
       h('div', { class: 'list-title-row' }, h('h1', { class: 'list-title' }, '我的通行密钥')),
-      searchBox('搜索网站、用户名或备注', state.query.passkeys, (v) => {
+      searchBox('搜索网站、用户名、备注或字段', state.query.passkeys, (v) => {
         state.query.passkeys = v;
         refill();
       }),
@@ -452,12 +455,13 @@ function renderCredentialDetail(c) {
         h('h2', { class: 'detail-title' }, credTitle(c)),
         h('div', { class: 'detail-subtitle' },
           h('span', { class: 'badge' }, '通行密钥'), titled(credentialBadges(c)), h('span', { class: 'pk-rp' }, c.rp_id)))),
-    h('div', { class: 'card' },
-      field('用户名', c.user_name, { actions: c.user_name ? [copyAction(c.user_name, '用户名')] : [] }),
-      field('显示名', c.user_display_name),
-      field('网站', c.rp_id, {
+    credentialNames(c, {
+      save: shared ? null : (patch) => patchCred(c, patch),
+      after: field('网站', c.rp_id, {
         actions: url ? [h('a', { class: 'icon-btn', href: url, target: '_blank', rel: 'noopener noreferrer', title: '打开网站', 'aria-label': '打开网站' }, icon('external'))] : [],
-      })),
+      }),
+    }),
+    credentialFields(c, { save: shared ? null : (fields) => patchCred(c, { fields }) }),
     shared ? sharedWithMe(c) : [labelSection(c), sharesSection(c)],
     h('h3', { class: 'section-title' }, '使用情况'),
     h('div', { class: 'card' },
@@ -482,18 +486,22 @@ function sharedWithMe(c) {
       field('所有者', c.owner.username),
       field('共享时间', fmtDateTime(c.shared_at)),
       field('备注', c.label, { placeholder: '无' })),
-    h('p', { class: 'pk-note' }, `这是 ${c.owner.username} 共享给你的通行密钥。你可以用它登录，但不能修改备注、再共享或转移。`),
+    h('p', { class: 'pk-note' }, `这是 ${c.owner.username} 共享给你的通行密钥。你可以用它登录、查看字段，但不能修改名称、字段和备注，也不能再共享或转移。`),
   ];
+}
+
+// patchCred changes the user's own passkey (its label, names or fields)
+// and keeps the returned passkey.
+async function patchCred(c, body) {
+  const data = await api('PATCH', `/credentials/${encodeURIComponent(c.id)}`, body);
+  const i = state.creds.findIndex((x) => x.id === c.id);
+  if (i >= 0) state.creds[i] = data.credential;
 }
 
 function labelSection(c) {
   return [
     h('h3', { class: 'section-title' }, '备注'),
-    labelEditor(c, async (label) => {
-      const data = await api('PATCH', `/credentials/${encodeURIComponent(c.id)}`, { label });
-      const i = state.creds.findIndex((x) => x.id === c.id);
-      if (i >= 0) state.creds[i] = data.credential;
-    }),
+    labelEditor(c, (label) => patchCred(c, { label })),
   ];
 }
 

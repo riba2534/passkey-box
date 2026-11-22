@@ -1,12 +1,13 @@
 // Shared widgets for sharing, transfers and admin batch work: the user
 // picker, batch requests with a dry-run preview, multi-select, list filters,
 // audit event sentences and the parts of a passkey's detail that the user
-// and admin pages share.
+// and admin pages share, its names and custom fields among them.
 
 import {
-  h, icon, iconButton, api, errText, sessionEnded, toast, toastError, renderShell, openModal, emptyState,
-  loading, searchBox, userAvatar, credBrief, algName, field, copyAction,
+  h, icon, iconButton, api, errText, sessionEnded, toast, toastError, renderShell, openModal, formDialog, emptyState,
+  loading, searchBox, userAvatar, credBrief, algName, field, copyAction, copyText,
 } from './core.js';
+import { parseTotp, canComputeCodes, hotp, totpCounter, groupCode } from './totp.js';
 
 /* ------------------------------------------------------------------ */
 /* User picker                                                         */
@@ -485,6 +486,34 @@ function say(...parts) {
   });
 }
 
+const UPDATED_NAMES = [['label', '备注'], ['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
+
+// updateChanges lists what a credential.update event changed, e.g.
+// "把网站名称改为「GitHub」" or "添加了字段「恢复码」". The detail names fields
+// by label only; their values are never in the audit log.
+function updateChanges(d) {
+  const parts = [];
+  for (const [key, name] of UPDATED_NAMES) {
+    const c = d[key];
+    if (c) parts.push(c.to ? `把${name}改为「${c.to}」` : `清除了${name}`);
+  }
+  const f = d.fields || {};
+  // "添加了字段「恢复码」、「PIN」和 1 个未命名字段"
+  const fields = (verb, list) => {
+    if (!list || !list.length) return;
+    const named = list.filter(Boolean).map((l) => `「${l}」`).join('、');
+    const unnamed = list.filter((l) => !l).length;
+    parts.push(verb + (named ? '字段' + named : '') + (unnamed ? `${named ? '和' : ''} ${unnamed} 个未命名字段` : ''));
+  };
+  const before = parts.length;
+  fields('添加了', f.added);
+  fields('修改了', f.changed);
+  fields('删除了', f.removed);
+  // A fields change with nothing added, changed or removed is a new order.
+  if (d.fields && parts.length === before) parts.push('调整了字段的顺序');
+  return parts;
+}
+
 /**
  * eventText describes an AuditEvent in one Chinese sentence, e.g.
  * "admin 把 alice 的 github.com · alice@example.com 转移给了 bob".
@@ -529,10 +558,16 @@ export function eventText(event, meId) {
       return say(actor, '注销了', whose, `的全部登录（${d.sessions || 0} 个会话、${d.tokens || 0} 个 API 令牌）`);
     case 'credential.create':
       return say(actor, self ? '' : ['为', subject], '新建了通行密钥', cred);
-    case 'credential.update':
-      return d.label && d.label.to
-        ? say(actor, '把', owned, '的备注改为', `「${d.label.to}」`)
-        : say(actor, '清除了', owned, '的备注');
+    case 'credential.update': {
+      const changes = updateChanges(d);
+      // Events before 0.7.0 only change the label, and so do many since.
+      if (!changes.length || (changes.length === 1 && d.label)) {
+        return d.label && d.label.to
+          ? say(actor, '把', owned, '的备注改为', `「${d.label.to}」`)
+          : say(actor, '清除了', owned, '的备注');
+      }
+      return say(actor, '修改了', owned, '：', changes.join('，'));
+    }
     case 'credential.delete':
       return say(actor, '删除了', owned);
     case 'credential.share':
@@ -635,4 +670,541 @@ export function credentialTechInfo(c) {
       field('用户句柄（User Handle）', c.user_handle, { mono: true, actions: [copyAction(c.user_handle, '用户句柄')] }),
       field('注册来源', c.origin)),
   ];
+}
+
+/* ------------------------------------------------------------------ */
+/* Names and custom fields                                             */
+/* ------------------------------------------------------------------ */
+
+const KEPT_HINT = '在网站上重新注册同一账号时，你改过的名称、备注和字段会保留。';
+
+// The server's limits (docs/API.md).
+const MAX_NAME = 1000;
+const MAX_FIELDS = 50;
+const MAX_LABEL = 100;
+const MAX_VALUE = 10000;
+
+// FIELD_TYPES names the custom field types, in the order the add menu
+// offers them. The extension uses the same names.
+const FIELD_TYPES = {
+  text: { name: '文本', icon: 'text' },
+  password: { name: '密码', icon: 'lock' },
+  totp: { name: '一次性密码', icon: 'timer' },
+  url: { name: '网址', icon: 'link' },
+  email: { name: '邮箱', icon: 'mail' },
+  phone: { name: '电话', icon: 'phone' },
+  date: { name: '日期', icon: 'calendar' },
+  multiline: { name: '多行文本', icon: 'lines' },
+};
+
+// Input attributes for the value of each type in the editor.
+const VALUE_INPUTS = {
+  url: { inputmode: 'url', placeholder: 'https://' },
+  email: { inputmode: 'email', placeholder: 'name@example.com' },
+  phone: { inputmode: 'tel', placeholder: '+86 138 0000 0000' },
+  date: { inputmode: 'numeric', placeholder: 'YYYY-MM-DD，例如 2026-11-23' },
+  totp: { placeholder: '粘贴 base32 密钥或 otpauth:// 链接' },
+};
+
+const MASK = '••••••••';
+const DATE_FORMAT = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
+function typeOf(f) {
+  return FIELD_TYPES[f.type] || FIELD_TYPES.text;
+}
+
+// fieldName is a field's label, or its type's name when it has none.
+function fieldName(f) {
+  return (f.label || '').trim() || typeOf(f).name;
+}
+
+function chars(s) {
+  return [...s].length;
+}
+
+// parseDate reads YYYY-MM-DD as a real calendar date (UTC), or returns null.
+function parseDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(0);
+  date.setUTCFullYear(y, mo - 1, d);
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d ? date : null;
+}
+
+// webURL is the value as a link target when it is an http(s) URL.
+function webURL(v) {
+  const s = v.trim();
+  if (!/^https?:\/\//i.test(s)) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function mailHref(v) {
+  const s = v.trim();
+  return /^[^\s@]+@[^\s@]+$/.test(s) ? 'mailto:' + s : null;
+}
+
+function telHref(v) {
+  const s = v.trim();
+  return /^\+?[\d\s().-]{3,}$/.test(s) && /\d/.test(s) ? 'tel:' + s.replace(/[^\d+]/g, '') : null;
+}
+
+// sectionHead is a section title, with a button on its right if given.
+function sectionHead(title, button) {
+  const t = h('h3', { class: 'section-title' }, title);
+  return button ? h('div', { class: 'section-bar' }, t, button) : t;
+}
+
+// saveError explains a failed PATCH in its dialog. The server names a bad
+// field by its index ("fields[3]: invalid TOTP secret"); fields is the
+// list that was sent.
+function saveError(err, fields) {
+  if (sessionEnded(err)) return '';
+  if (err.code !== 'invalid_request' || !err.message) return errText(err);
+  const m = /^fields\[(\d+)\]:\s*(.*)$/.exec(err.message);
+  const f = m && fields && fields[Number(m[1])];
+  if (!f) return `${errText(err)}：${err.message}`;
+  const name = [...fieldName(f)];
+  return `第 ${Number(m[1]) + 1} 个字段「${name.length > 16 ? name.slice(0, 15).join('') + '…' : name.join('')}」：${m[2]}`;
+}
+
+// revealButton is an eye button that shows and hides what; toggle gets
+// whether it is shown now.
+function revealButton(what, toggle) {
+  let shown = false;
+  const button = iconButton('eye', '显示' + what, () => {
+    shown = !shown;
+    toggle(shown);
+    button.replaceChildren(icon(shown ? 'eye-off' : 'eye'));
+    button.title = (shown ? '隐藏' : '显示') + what;
+    button.setAttribute('aria-label', button.title);
+  });
+  return button;
+}
+
+/**
+ * credentialNames is the 账号 section of a passkey's detail: 网站名称, 用户名
+ * and 显示名. With save it has an 编辑 button whose dialog sends only the
+ * names that changed, then says so and redraws; a failure is shown in the
+ * dialog.
+ *
+ * @param {object} c  Credential.
+ * @param {object} [opts]
+ * @param {(patch: {rp_name?: string, user_name?: string, user_display_name?: string}) => Promise<void>} [opts.save]
+ *   Sends the PATCH and updates the page's data. Leave it out for viewers
+ *   who may not edit.
+ * @param {Node|Node[]} [opts.before]  Rows above the names, e.g. the owner.
+ * @param {Node|Node[]} [opts.after]   Rows below them, e.g. the site.
+ * @returns {HTMLElement[]} The section title and its card.
+ */
+export function credentialNames(c, opts) {
+  const o = opts || {};
+  const edit = o.save
+    ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => editNames(c, o.save) }, icon('edit'), '编辑')
+    : null;
+  return [
+    sectionHead('账号', edit),
+    h('div', { class: 'card' },
+      o.before,
+      field('网站名称', c.rp_name, { placeholder: `未设置，显示为 ${c.rp_id}` }),
+      field('用户名', c.user_name, { actions: c.user_name ? [copyAction(c.user_name, '用户名')] : [] }),
+      field('显示名', c.user_display_name),
+      o.after),
+  ];
+}
+
+const NAMES = [['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
+
+function editNames(c, save) {
+  formDialog({
+    title: '编辑账号信息',
+    intro: KEPT_HINT,
+    fields: [
+      { name: 'rp_name', label: '网站名称', value: c.rp_name || '', placeholder: c.rp_id, hint: '列表和详情的标题，留空时显示网站域名。' },
+      { name: 'user_name', label: '用户名', value: c.user_name || '' },
+      { name: 'user_display_name', label: '显示名', value: c.user_display_name || '' },
+    ],
+    onSubmit: async (v) => {
+      const patch = {};
+      for (const [key, name] of NAMES) {
+        if (v[key] === (c[key] || '')) continue;
+        const s = v[key].trim();
+        if (chars(s) > MAX_NAME) return `${name}不能超过 ${MAX_NAME} 个字符`;
+        patch[key] = s;
+      }
+      if (!Object.keys(patch).length) return '';
+      try {
+        await save(patch);
+      } catch (err) {
+        return saveError(err);
+      }
+      toast('账号信息已保存');
+      renderShell();
+      return '';
+    },
+  });
+}
+
+/**
+ * credentialFields is the 自定义字段 section of a passkey's detail. Each
+ * field shows its type, label and value: passwords and TOTP secrets stay
+ * hidden until shown, http(s) URLs, emails and phone numbers are links, and
+ * a TOTP field shows its current code with the seconds left. With save it
+ * has a button that opens the editor, which sends the whole list.
+ *
+ * @param {object} c  Credential; servers before 0.7.0 leave out fields.
+ * @param {object} [opts]
+ * @param {(fields: {id?: string, label: string, type: string, value: string}[]) => Promise<void>} [opts.save]
+ *   Sends the PATCH and updates the page's data. Leave it out for viewers
+ *   who may not edit.
+ * @returns {HTMLElement[]} The section title and its card; nothing for a
+ *   viewer when there are no fields.
+ */
+export function credentialFields(c, opts) {
+  const save = opts && opts.save;
+  const fields = c.fields || [];
+  if (!save && !fields.length) return [];
+  const edit = save
+    ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => editFields(c, save) },
+      icon(fields.length ? 'edit' : 'plus'), fields.length ? '编辑' : '添加')
+    : null;
+  return [
+    sectionHead(fields.length ? `自定义字段 · ${fields.length}` : '自定义字段', edit),
+    h('div', { class: 'card' }, fields.length
+      ? fields.map(fieldRow)
+      : h('div', { class: 'card-empty' }, '可以添加恢复码、PIN、一次性密码（TOTP）等信息，主人和被共享的人都能看到。')),
+  ];
+}
+
+function fieldRow(f) {
+  const t = typeOf(f);
+  const name = fieldName(f);
+  const v = f.value || '';
+  const value = h('div', { class: 'field-value' });
+  const more = [];
+  const actions = [];
+  if (f.type === 'totp') {
+    const p = parseTotp(v);
+    const code = totpCode(p);
+    const secret = h('div', { class: 'cf-secret', hidden: true },
+      h('code', null, v),
+      iconButton('copy', '复制密钥', () => copyText(v.trim(), '密钥')));
+    value.append(code);
+    more.push(secret);
+    actions.push(revealButton('密钥', (shown) => { secret.hidden = !shown; }));
+    if (!p.error) actions.push(iconButton('copy', '复制验证码', () => code.code && copyText(code.code, '验证码')));
+  } else if (!v) {
+    value.classList.add('muted');
+    value.textContent = '—';
+  } else {
+    let href = null;
+    switch (f.type) {
+      case 'password':
+        value.textContent = MASK;
+        actions.push(revealButton(name, (shown) => {
+          value.textContent = shown ? v : MASK;
+          value.classList.toggle('mono', shown);
+        }));
+        break;
+      case 'url':
+        href = webURL(v);
+        value.append(href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, v) : v);
+        break;
+      case 'email':
+        href = mailHref(v);
+        value.append(href ? h('a', { href }, v) : v);
+        break;
+      case 'phone':
+        href = telHref(v);
+        value.append(href ? h('a', { href }, v) : v);
+        break;
+      case 'date': {
+        const d = parseDate(v);
+        value.append(d ? DATE_FORMAT.format(d) : v);
+        break;
+      }
+      case 'multiline':
+        value.classList.add('multiline');
+        value.append(v);
+        break;
+      default:
+        value.append(v);
+    }
+    actions.push(copyAction(v, name));
+  }
+  return h('div', { class: 'field cf-row' },
+    h('span', { class: 'cf-icon', title: t.name }, icon(t.icon)),
+    h('div', { class: 'field-main' }, h('div', { class: 'field-label' }, name), value, more),
+    actions.length ? h('div', { class: 'field-actions' }, actions) : null);
+}
+
+/**
+ * totpCode shows the current code of a TOTP field and the seconds left in
+ * its period, and keeps them current every second while it is in the
+ * document. Its timer stops at the first tick after the element has left
+ * the document, that is once a redraw or another page replaced it.
+ *
+ * @param {ReturnType<typeof parseTotp>} p
+ * @returns {HTMLElement & {code: string}} code is the code shown, "" until
+ *   it is computed or when it cannot be.
+ */
+function totpCode(p) {
+  let note = '';
+  if (p.error) note = '无法识别这个密钥';
+  else if (!canComputeCodes()) note = '浏览器只在 HTTPS 页面上提供验证码计算';
+  if (note) return Object.assign(h('span', { class: 'totp-note' }, note), { code: '' });
+
+  const digits = h('span', { class: 'totp-digits' }, groupCode('•'.repeat(p.digits)));
+  const ring = h('span', { class: 'totp-ring', 'aria-hidden': 'true' });
+  const left = h('span', { class: 'totp-left' });
+  const el = Object.assign(h('span', { class: 'totp' }, digits, h('span', { class: 'totp-timer' }, ring, left)), { code: '' });
+  let counter = -1;
+  const paint = () => {
+    const step = totpCounter(p, Date.now() / 1000);
+    left.textContent = `${step.remaining} 秒`;
+    ring.style.setProperty('--left', String(step.remaining / p.period));
+    el.classList.toggle('ending', step.remaining <= 5);
+    return step;
+  };
+  const tick = () => {
+    if (!el.isConnected) return;
+    const step = paint();
+    if (step.counter !== counter) {
+      counter = step.counter;
+      hotp(p.secret, step.counter, p.algorithm, p.digits).then((code) => {
+        if (counter !== step.counter) return;
+        el.code = code;
+        digits.textContent = groupCode(code);
+      }, () => {
+        el.code = '';
+        digits.textContent = '无法计算';
+      });
+    }
+    // Just after the next whole second, when the countdown changes.
+    setTimeout(tick, 1010 - (Date.now() % 1000));
+  };
+  paint();
+  setTimeout(tick, 0);
+  return el;
+}
+
+let draftKey = 0;
+
+function sameFields(a, b) {
+  return a.length === b.length && a.every((f, i) => f.id === b[i].id && f.type === b[i].type
+    && f.label === (b[i].label || '') && f.value === (b[i].value || ''));
+}
+
+// editFields opens the editor for a passkey's custom fields: add one (type
+// first, then label and value), change, remove and reorder them, then save
+// the whole list at once. What it checks while typing is advice: the server
+// decides, and its message shows in the dialog.
+function editFields(c, save) {
+  const original = c.fields || [];
+  const draft = original.map((f) => ({ id: f.id, label: f.label || '', type: f.type, value: f.value || '', key: ++draftKey }));
+  let choosing = !draft.length;
+  let list;
+  let adder;
+
+  const rowOf = (d) => list.querySelector(`[data-key="${d.key}"]`);
+
+  const draw = () => {
+    list.replaceChildren(...(draft.length
+      ? draft.map(editorRow)
+      : [h('div', { class: 'cf-edit-empty' }, original.length ? '已删除全部字段，保存后生效。' : '还没有自定义字段。')]));
+    drawAdder();
+  };
+
+  const drawAdder = () => {
+    if (draft.length >= MAX_FIELDS) {
+      adder.replaceChildren(h('div', { class: 'form-hint' }, `最多 ${MAX_FIELDS} 个字段`));
+    } else if (!choosing) {
+      adder.replaceChildren(h('button', {
+        type: 'button',
+        class: 'btn btn-sm',
+        onclick: () => {
+          choosing = true;
+          drawAdder();
+          adder.scrollIntoView({ block: 'nearest' });
+          adder.querySelector('.cf-type-btn').focus();
+        },
+      }, icon('plus'), '添加字段'));
+    } else {
+      adder.replaceChildren(
+        h('div', { class: 'cf-add-title' }, '选择字段类型'),
+        h('div', { class: 'cf-types' }, Object.entries(FIELD_TYPES).map(([type, t]) => h('button', {
+          type: 'button',
+          class: 'cf-type-btn',
+          onclick: () => add(type),
+        }, icon(t.icon), t.name))),
+        draft.length
+          ? h('button', { type: 'button', class: 'btn btn-sm cf-add-cancel', onclick: () => { choosing = false; drawAdder(); } }, '取消')
+          : null);
+    }
+  };
+
+  const add = (type) => {
+    const d = { label: '', type, value: '', key: ++draftKey };
+    draft.push(d);
+    choosing = false;
+    draw();
+    const row = rowOf(d);
+    row.scrollIntoView({ block: 'nearest' });
+    row.querySelector('[data-role="label"]').focus();
+  };
+
+  const move = (d, by) => {
+    const i = draft.indexOf(d);
+    draft.splice(i, 1);
+    draft.splice(i + by, 0, d);
+    draw();
+    const [up, down] = rowOf(d).querySelectorAll('.cf-edit-actions .icon-btn');
+    const target = by < 0 ? up : down;
+    (target.disabled ? (by < 0 ? down : up) : target).focus();
+  };
+
+  const remove = (d) => {
+    const i = draft.indexOf(d);
+    draft.splice(i, 1);
+    draw();
+    const next = draft[Math.min(i, draft.length - 1)];
+    (next ? rowOf(next).querySelector('[data-role="label"]') : adder.querySelector('button')).focus();
+  };
+
+  const editorRow = (d, i) => {
+    const t = typeOf(d);
+    const labelHint = h('div', { class: 'cf-hint bad' });
+    const valueHint = h('div', { class: 'cf-hint' });
+    const label = h('input', {
+      class: 'input', value: d.label, placeholder: `字段名，留空时显示“${t.name}”`,
+      'aria-label': '字段名', autocomplete: 'off', 'data-role': 'label',
+    });
+    const checkLabel = () => {
+      const n = chars(d.label.trim());
+      labelHint.textContent = n > MAX_LABEL ? `字段名不能超过 ${MAX_LABEL} 个字符，现在是 ${n} 个` : '';
+    };
+    label.addEventListener('input', () => {
+      d.label = label.value;
+      checkLabel();
+    });
+
+    let previewed = null;
+    const checkValue = () => {
+      const n = chars(d.value);
+      valueHint.classList.remove('bad');
+      if (n > MAX_VALUE) {
+        valueHint.classList.add('bad');
+        valueHint.textContent = `内容不能超过 ${MAX_VALUE} 个字符，现在是 ${n} 个`;
+        previewed = null;
+      } else if (d.type === 'date') {
+        const bad = d.value !== '' && !parseDate(d.value);
+        valueHint.classList.toggle('bad', bad);
+        valueHint.textContent = bad ? '日期格式应为 YYYY-MM-DD，例如 2026-11-23' : '';
+      } else if (d.type === 'totp' && d.value.trim() !== previewed) {
+        previewed = d.value.trim();
+        const p = parseTotp(d.value);
+        if (p.error) {
+          valueHint.classList.toggle('bad', Boolean(previewed));
+          valueHint.replaceChildren(previewed ? p.error : '可以粘贴网站给出的密钥，或者二维码里的 otpauth:// 链接');
+        } else {
+          valueHint.replaceChildren(h('span', { class: 'cf-preview' }, '验证码预览', totpCode(p),
+            h('span', null, `${p.algorithm.replace('-', '')} · ${p.digits} 位 · ${p.period} 秒一换`)));
+        }
+      } else if (d.type !== 'totp') {
+        valueHint.textContent = '';
+      }
+    };
+
+    const attrs = {
+      class: 'input', 'aria-label': '值', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      'data-role': 'value', ...(VALUE_INPUTS[d.type] || { placeholder: '值' }),
+    };
+    let input;
+    let valueBox;
+    if (d.type === 'multiline') {
+      input = h('textarea', { ...attrs, class: 'input textarea cf-textarea', rows: 3, value: d.value });
+      valueBox = input;
+    } else if (d.type === 'password' || d.type === 'totp') {
+      // Masked with CSS rather than type=password, so the browser does not
+      // offer to fill in or save the console's own password here.
+      input = h('input', { ...attrs, class: 'input cf-masked', value: d.value });
+      valueBox = h('div', { class: 'cf-input-wrap' }, input,
+        revealButton(d.type === 'totp' ? '密钥' : '密码', (shown) => input.classList.toggle('cf-masked', !shown)));
+    } else {
+      input = h('input', { ...attrs, value: d.value });
+      valueBox = input;
+    }
+    input.addEventListener('input', () => {
+      d.value = input.value;
+      checkValue();
+    });
+
+    const up = iconButton('up', '上移', () => move(d, -1));
+    const down = iconButton('down', '下移', () => move(d, 1));
+    up.disabled = i === 0;
+    down.disabled = i === draft.length - 1;
+    checkLabel();
+    checkValue();
+    return h('div', { class: 'cf-edit-row', 'data-key': d.key },
+      h('div', { class: 'cf-edit-head' },
+        h('span', { class: 'cf-edit-type' }, icon(t.icon), t.name),
+        h('div', { class: 'cf-edit-actions' }, up, down, iconButton('trash', '删除这个字段', () => remove(d), 'danger'))),
+      label, labelHint, valueBox, valueHint);
+  };
+
+  openModal('编辑自定义字段', (close) => {
+    list = h('div', { class: 'cf-edit-list' });
+    adder = h('div', { class: 'cf-add' });
+    const error = h('div', { class: 'form-error cf-edit-error', role: 'alert' });
+    const submit = h('button', {
+      type: 'button',
+      class: 'btn btn-primary',
+      onclick: async () => {
+        const fields = draft.map((d) => (d.id
+          ? { id: d.id, label: d.label, type: d.type, value: d.value }
+          : { label: d.label, type: d.type, value: d.value }));
+        if (sameFields(fields, original)) {
+          close();
+          return;
+        }
+        submit.disabled = true;
+        error.textContent = '';
+        for (const row of list.querySelectorAll('.cf-edit-row.invalid')) row.classList.remove('invalid');
+        try {
+          await save(fields);
+        } catch (err) {
+          submit.disabled = false;
+          error.textContent = saveError(err, draft);
+          const m = /^fields\[(\d+)\]/.exec(err.message || '');
+          const bad = m && draft[Number(m[1])];
+          if (bad) {
+            rowOf(bad).classList.add('invalid');
+            rowOf(bad).scrollIntoView({ block: 'nearest' });
+          }
+          return;
+        }
+        close();
+        toast('自定义字段已保存');
+        renderShell();
+      },
+    }, '保存');
+    draw();
+    // Only the body scrolls, so the error and the buttons stay in view.
+    return [
+      h('div', { class: 'modal-body cf-edit-body' },
+        list,
+        adder,
+        h('p', { class: 'form-hint' }, '主人和被共享的人都能看到这些字段。', KEPT_HINT)),
+      error,
+      h('div', { class: 'modal-foot' },
+        h('button', { type: 'button', class: 'btn', onclick: () => close() }, '取消'),
+        submit),
+    ];
+  }, null, { wide: true });
+  if (choosing) adder.querySelector('.cf-type-btn').focus();
 }
