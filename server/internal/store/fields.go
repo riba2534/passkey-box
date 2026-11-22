@@ -27,7 +27,8 @@ type Field struct {
 // FieldTypes are the types a Field may have.
 var FieldTypes = []string{"text", "password", "url", "email", "phone", "date", "multiline", "totp"}
 
-// Limits of custom fields, in characters after trimming.
+// Limits of custom fields: fields per credential, and characters in a label
+// (after trimming) and in a value.
 const (
 	MaxFields        = 50
 	MaxFieldLabelLen = 100

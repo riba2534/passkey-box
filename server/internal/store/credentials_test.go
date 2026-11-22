@@ -590,7 +590,8 @@ func TestSaveCredentialKeepsTheNewestReplaced(t *testing.T) {
 	}
 }
 
-// Credentials migrated from schema 1 have no fields, as a list.
+// Credentials migrated from schema 1 have no fields, as a list. So does a
+// column set to JSON null by hand.
 func TestMigratedCredentialsHaveNoFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pkb.db")
 	writeV1Database(t, path)
@@ -599,6 +600,7 @@ func TestMigratedCredentialsHaveNoFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	mustExec(t, s.db, `UPDATE credentials SET fields = 'null' WHERE id = 'YQ'`)
 	creds, _, err := s.ListAllCredentials(t.Context(), CredentialFilter{Limit: 10})
 	if err != nil || len(creds) != 5 {
 		t.Fatalf("credentials = %+v, %v", creds, err)
