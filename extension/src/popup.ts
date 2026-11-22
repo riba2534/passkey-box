@@ -7,7 +7,6 @@ import { MANAGED_KEY, type ManagedPolicy } from "./lib/managed";
 import {
   accountName,
   credentialTitle,
-  customFields,
   detailFields,
   fieldLabel,
   fieldLink,
@@ -320,7 +319,8 @@ function renderMain(config: Config, settings: Settings, policy: ManagedPolicy, h
         }
       })();
     });
-    const extra = customFields(c);
+    // Servers before 0.7.0 send no fields.
+    const extra = c.fields ?? [];
     const ticks: Array<(now: number) => void> = [];
     view.replaceChildren(
       backBar(""),

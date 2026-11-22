@@ -3,7 +3,6 @@ import type { Field, FieldType } from "../src/lib/api";
 import {
   accountName,
   credentialTitle,
-  customFields,
   detailFields,
   fieldLabel,
   fieldLink,
@@ -140,12 +139,6 @@ describe("popup model: passkeys shared by other users", () => {
 
 describe("popup model: custom fields", () => {
   const field = (type: FieldType, value: string, label = ""): Field => ({ id: "x", label, type, value });
-
-  it("are the server's list, or none from a server before 0.7.0", () => {
-    const list = [field("text", "a"), field("totp", "GE")];
-    expect(customFields(cred({ fields: list }))).toBe(list);
-    expect(customFields(cred({}))).toEqual([]);
-  });
 
   it("are named by their label, else by their type", () => {
     expect(fieldLabel(field("password", "", "  恢复码 "))).toBe("恢复码");

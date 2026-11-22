@@ -31,11 +31,6 @@ export function detailFields(c: Credential): Array<[string, string]> {
   ];
 }
 
-/** The custom fields shown under the details; servers before 0.7.0 send none. */
-export function customFields(c: Pick<Credential, "fields">): Field[] {
-  return c.fields ?? [];
-}
-
 const FIELD_TYPE_NAMES: Record<FieldType, string> = {
   text: "文本",
   password: "密码",
@@ -65,13 +60,7 @@ export function fieldText(f: Pick<Field, "type" | "value">, revealed = false): s
 
 /** The page a "url" field opens: only http(s) URLs are links, anything else is plain text. */
 export function fieldLink(f: Pick<Field, "type" | "value">): string | null {
-  if (f.type !== "url") return null;
-  try {
-    const u = new URL(f.value.trim());
-    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
-  } catch {
-    return null;
-  }
+  return f.type === "url" ? (httpURL(f.value.trim())?.href ?? null) : null;
 }
 
 /** "123 456": a one-time code in two groups, the longer one first. */
@@ -95,12 +84,16 @@ export function removeAction(c: Pick<Credential, "access">): RemoveAction {
 
 /** Hostname of an http(s) tab URL, or "" for chrome://, file:, about: and invalid URLs. */
 export function tabHostname(url: string | undefined): string {
-  if (!url) return "";
+  return (url && httpURL(url)?.hostname) || "";
+}
+
+/** `text` parsed as an http(s) URL, or null for other schemes and invalid URLs. */
+function httpURL(text: string): URL | null {
   try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.hostname : "";
+    const u = new URL(text);
+    return u.protocol === "http:" || u.protocol === "https:" ? u : null;
   } catch {
-    return "";
+    return null;
   }
 }
 

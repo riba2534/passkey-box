@@ -355,7 +355,6 @@ body.popup {
   flex: 1;
   min-width: 0;
   white-space: pre-wrap;
-  word-break: break-all;
 }
 
 .totp-code {
