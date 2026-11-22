@@ -32,6 +32,12 @@ func checkShareUsers(w http.ResponseWriter, ids, users int) bool {
 	return true
 }
 
+// scoped binds whether a credential batch handler may reach every user's
+// credentials (the admin routes) or only the caller's.
+func scoped(h func(http.ResponseWriter, *http.Request, *caller, bool), admin bool) authedHandler {
+	return func(w http.ResponseWriter, r *http.Request, c *caller) { h(w, r, c, admin) }
+}
+
 // writeCredentialBatch answers the results of a credential batch, or its error.
 func writeCredentialBatch[R, V any](s *Server, w http.ResponseWriter, dryRun bool, results []R, err error, view func(R) V) {
 	if err != nil {
@@ -45,10 +51,6 @@ func writeCredentialBatch[R, V any](s *Server, w http.ResponseWriter, dryRun boo
 	writeJSON(w, http.StatusOK, map[string]any{"dry_run": dryRun, "results": out})
 }
 
-func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.shareCredentials(w, r, c, false)
-}
-
 func (s *Server) shareCredentials(w http.ResponseWriter, r *http.Request, c *caller, admin bool) {
 	var req struct {
 		credentialBatchRequest
@@ -60,10 +62,6 @@ func (s *Server) shareCredentials(w http.ResponseWriter, r *http.Request, c *cal
 	}
 	results, err := s.opts.Store.ShareCredentials(r.Context(), req.batch(s, c, admin), userKeys(req.Users))
 	writeCredentialBatch(s, w, req.DryRun, results, err, newShareResultView)
-}
-
-func (s *Server) handleUnshare(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.unshareCredentials(w, r, c, false)
 }
 
 func (s *Server) unshareCredentials(w http.ResponseWriter, r *http.Request, c *caller, admin bool) {
@@ -84,10 +82,6 @@ func (s *Server) unshareCredentials(w http.ResponseWriter, r *http.Request, c *c
 	}
 	results, err := s.opts.Store.UnshareCredentials(r.Context(), req.batch(s, c, admin), userKeys(req.Users), req.All)
 	writeCredentialBatch(s, w, req.DryRun, results, err, newShareResultView)
-}
-
-func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.transferCredentials(w, r, c, false)
 }
 
 func (s *Server) transferCredentials(w http.ResponseWriter, r *http.Request, c *caller, admin bool) {
@@ -114,10 +108,6 @@ func (s *Server) handleLeave(w http.ResponseWriter, r *http.Request, c *caller) 
 	}
 	results, err := s.opts.Store.LeaveCredentials(r.Context(), req.batch(s, c, false))
 	writeCredentialBatch(s, w, req.DryRun, results, err, newCredentialResultView)
-}
-
-func (s *Server) handleBatchDeleteCredentials(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.deleteCredentials(w, r, c, false)
 }
 
 func (s *Server) deleteCredentials(w http.ResponseWriter, r *http.Request, c *caller, admin bool) {

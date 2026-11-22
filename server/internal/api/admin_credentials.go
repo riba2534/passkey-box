@@ -123,19 +123,3 @@ func (s *Server) handleAdminDeleteCredential(w http.ResponseWriter, r *http.Requ
 	err := s.opts.Store.AdminDeleteCredential(r.Context(), c.actor(), r.PathValue("id"), s.opts.Now())
 	s.writeNoContent(w, err, credentialNotFound)
 }
-
-func (s *Server) handleAdminShare(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.shareCredentials(w, r, c, true)
-}
-
-func (s *Server) handleAdminUnshare(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.unshareCredentials(w, r, c, true)
-}
-
-func (s *Server) handleAdminTransfer(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.transferCredentials(w, r, c, true)
-}
-
-func (s *Server) handleAdminBatchDeleteCredentials(w http.ResponseWriter, r *http.Request, c *caller) {
-	s.deleteCredentials(w, r, c, true)
-}
