@@ -64,17 +64,17 @@ const credentialColumns = `c.seq, c.user_id, o.username, c.id, c.rp_id, c.rp_nam
 
 const credentialsFrom = ` FROM credentials c JOIN users o ON o.id = c.user_id`
 
+// accessibleFrom selects credentials with the time they were shared with a
+// user, its first parameter (scanAccessible).
+const accessibleFrom = `SELECT ` + credentialColumns + `, sh.created_at` + credentialsFrom + `
+	LEFT JOIN credential_shares sh ON sh.credential_seq = c.seq AND sh.user_id = ?`
+
 // accessibleQuery selects the credentials a user owns or that are shared with
-// them, together with the time of that share. Its parameters are the user's
-// ID three times (accessibleArgs). The IN list keeps both lookups on indexes.
-const accessibleQuery = `SELECT ` + credentialColumns + `, sh.created_at` + credentialsFrom + `
-	LEFT JOIN credential_shares sh ON sh.credential_seq = c.seq AND sh.user_id = ?
+// them. Its parameters are the user's ID three times. The IN list keeps both
+// lookups on indexes.
+const accessibleQuery = accessibleFrom + `
 	WHERE c.seq IN (SELECT seq FROM credentials WHERE user_id = ?
 		UNION ALL SELECT credential_seq FROM credential_shares WHERE user_id = ?)`
-
-func accessibleArgs(userID int64, more ...any) []any {
-	return append([]any{userID, userID, userID}, more...)
-}
 
 const credentialOrder = ` ORDER BY c.created_at DESC, c.seq DESC`
 
@@ -99,7 +99,7 @@ func scanCredential(r rowScanner, trailing ...any) (Credential, error) {
 	return c, nil
 }
 
-// scanAccessible returns a scanner for accessibleQuery rows that sets Access
+// scanAccessible returns a scanner for accessibleFrom rows that sets Access
 // and SharedAt relative to the user.
 func scanAccessible(userID int64) func(rowScanner) (Credential, error) {
 	return func(r rowScanner) (Credential, error) {
@@ -118,8 +118,11 @@ func scanAccessible(userID int64) func(rowScanner) (Credential, error) {
 }
 
 // getAccessible loads a credential the user owns or that is shared with them.
+// It looks the ID up directly instead of listing all of the user's
+// credentials like accessibleQuery.
 func getAccessible(ctx context.Context, q queryer, userID int64, id string) (Credential, error) {
-	return scanAccessible(userID)(q.QueryRowContext(ctx, accessibleQuery+` AND c.id = ?`, accessibleArgs(userID, id)...))
+	return scanAccessible(userID)(q.QueryRowContext(ctx, accessibleFrom+`
+		WHERE c.id = ? AND (c.user_id = ? OR sh.user_id IS NOT NULL)`, userID, id, userID))
 }
 
 // getAny loads any credential.
@@ -210,7 +213,7 @@ func (s *Store) ListCredentials(ctx context.Context, userID int64, rpID string) 
 // shared with them, newest first, with their shares.
 func (s *Store) ListAccessibleCredentials(ctx context.Context, userID int64, f AccessFilter) ([]Credential, error) {
 	query := accessibleQuery
-	args := accessibleArgs(userID)
+	args := []any{userID, userID, userID}
 	if f.RPID != "" {
 		query += ` AND c.rp_id_key = ?`
 		args = append(args, strings.ToLower(f.RPID))

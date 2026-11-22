@@ -13,12 +13,22 @@ func userNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "user not found")
 }
 
-// targetUser loads the user named by the {user_id} path value. It writes the
-// error response and returns false when the user cannot be loaded.
-func (s *Server) targetUser(w http.ResponseWriter, r *http.Request) (store.User, bool) {
+// pathUserID parses the {user_id} path value. It answers 404 and returns
+// false when it is not a number; the store reports IDs of no user.
+func pathUserID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("user_id"), 10, 64)
 	if err != nil {
 		userNotFound(w)
+		return 0, false
+	}
+	return id, true
+}
+
+// targetUser loads the user named by the {user_id} path value. It writes the
+// error response and returns false when the user cannot be loaded.
+func (s *Server) targetUser(w http.ResponseWriter, r *http.Request) (store.User, bool) {
+	id, ok := pathUserID(w, r)
+	if !ok {
 		return store.User{}, false
 	}
 	user, err := s.opts.Store.GetUser(r.Context(), id)
@@ -103,11 +113,11 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, c
 	if !readJSON(w, r, &req) {
 		return
 	}
-	target, ok := s.targetUser(w, r)
+	id, ok := pathUserID(w, r)
 	if !ok {
 		return
 	}
-	res, err := s.opts.Store.UpdateUser(r.Context(), c.actor(), target.ID, store.UserUpdate(req), s.opts.Now())
+	res, err := s.opts.Store.UpdateUser(r.Context(), c.actor(), id, store.UserUpdate(req), s.opts.Now())
 	if err != nil {
 		s.writeStoreError(w, err, userNotFound)
 		return
@@ -116,19 +126,19 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request, c
 }
 
 func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request, c *caller) {
-	target, ok := s.targetUser(w, r)
+	id, ok := pathUserID(w, r)
 	if !ok {
 		return
 	}
-	s.writeNoContent(w, s.opts.Store.DeleteUser(r.Context(), c.actor(), target.ID, s.opts.Now()), userNotFound)
+	s.writeNoContent(w, s.opts.Store.DeleteUser(r.Context(), c.actor(), id, s.opts.Now()), userNotFound)
 }
 
 func (s *Server) handleAdminRevokeSessions(w http.ResponseWriter, r *http.Request, c *caller) {
-	target, ok := s.targetUser(w, r)
+	id, ok := pathUserID(w, r)
 	if !ok {
 		return
 	}
-	sessions, tokens, err := s.opts.Store.RevokeAccess(r.Context(), c.actor(), target.ID, s.opts.Now())
+	sessions, tokens, err := s.opts.Store.RevokeAccess(r.Context(), c.actor(), id, s.opts.Now())
 	if err != nil {
 		s.writeStoreError(w, err, userNotFound)
 		return
