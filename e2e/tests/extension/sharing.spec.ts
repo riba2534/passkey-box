@@ -1,14 +1,26 @@
-import { expect, inProfile, type PkbExtension, test } from '../../support/extension-fixtures.ts';
+import { expect, inProfile, type PkbExtension, type Profile, test } from '../../support/extension-fixtures.ts';
 import type { Credential, PkbApi, TestUser } from '../../support/pkb-api.ts';
 import type { RpPage } from '../../support/rp.ts';
 import { extensionSince, type StackState } from '../../support/stack.ts';
 
 // Since 0.6.0 a Passkey Box user can share a passkey with other users or transfer it to them. The
-// extension signs in with a passkey shared with its account exactly like with its own; from 0.6.0
-// on it also names the owner. Older extensions get the same credentials and must keep working, so
-// assertions on the 0.6.0 labels only run against an extension that has them.
+// extension signs in with a passkey shared with its account like with its own and names the owner,
+// but sharing needs no consent: a shared passkey only signs in by itself once the user picked it in
+// that browser profile. Older extensions get the same credentials and must keep working, so
+// assertions on 0.6.0 behaviour only run against an extension that has it.
 
 const brief = (user: TestUser) => ({ id: user.id, username: user.username });
+
+/** The first sign-in with "alice" shared with the profile's user: from 0.6.0 the user picks it once. */
+async function chooseSharedAlice(stack: StackState, profile: Profile) {
+  await profile.rp.login();
+  if (extensionSince(stack, '0.6.0')) {
+    await expect(profile.ui.pickerAccounts()).toHaveCount(1);
+    await expect(profile.rp.result).toHaveText('pending:login');
+    await profile.ui.pickerAccounts().click();
+  }
+  await profile.rp.expectResult('authenticated:alice');
+}
 
 /** The test's own browser profile, signed in as user A, registers "alice" on the RP. */
 async function registerAlice({ extension, stack, rp, pkb }: { extension: PkbExtension; stack: StackState; rp: RpPage; pkb: PkbApi }) {
@@ -20,7 +32,7 @@ async function registerAlice({ extension, stack, rp, pkb }: { extension: PkbExte
   return saved[0] as Credential;
 }
 
-test('a passkey shared with another user signs that user in', async ({ extension, stack, rp, pkb, headless }) => {
+test('a passkey shared with another user signs that user in, directly once chosen', async ({ extension, stack, rp, pkb, headless }) => {
   const { a, b } = stack.users;
   const alice = await registerAlice({ extension, stack, rp, pkb });
   const shared = await pkb.share(a, [alice.id], [b.username]);
@@ -28,13 +40,38 @@ test('a passkey shared with another user signs that user in', async ({ extension
   expect(await pkb.listCredentials(b)).toEqual([expect.objectContaining({ id: alice.id, access: 'shared', owner: brief(a) })]);
 
   await inProfile(stack, b, headless, async (bob) => {
+    await chooseSharedAlice(stack, bob);
+    await bob.rp.page.reload();
     await bob.rp.login();
     await bob.rp.expectResult('authenticated:alice');
     await bob.ui.expectNoDialog();
-    // The use counts for the passkey and for B's share.
+    // Each use counts for the passkey and for B's share.
     await expect
       .poll(() => pkb.getCredential(a, alice.id))
-      .toMatchObject({ use_count: 1, shared_with: [{ user: brief(b), last_used_at: expect.any(String) }] });
+      .toMatchObject({ use_count: 2, shared_with: [{ user: brief(b), last_used_at: expect.any(String) }] });
+  });
+});
+
+test('opening a page does not silently sign in with a passkey another user shared', async ({ extension, stack, rp, pkb, headless }) => {
+  test.skip(!extensionSince(stack, '0.6.0'), 'extensions before 0.6.0 sign in with a shared passkey like with their own');
+  const { a, b } = stack.users;
+  const alice = await registerAlice({ extension, stack, rp, pkb });
+  await pkb.share(a, [alice.id], [b.username]);
+
+  await inProfile(stack, b, headless, async (bob) => {
+    await bob.rp.goto({ conditional: true });
+    await expect(bob.ui.dialog('picker')).toBeVisible();
+    await expect(bob.ui.pickerAccounts()).toHaveCount(1);
+    await expect(bob.ui.pickerAccounts().getByText('共享自 e2e-user-a', { exact: true })).toBeVisible();
+    await expect(bob.rp.result).toHaveText('pending:conditional');
+    expect((await pkb.getCredential(a, alice.id)).use_count).toBe(0);
+
+    await bob.ui.pickerAccounts().click();
+    await bob.rp.expectResult('authenticated:alice');
+    // Chosen once in this profile, it signs in as soon as the page opens.
+    await bob.rp.goto({ conditional: true });
+    await bob.rp.expectResult('authenticated:alice');
+    await bob.ui.expectNoDialog();
   });
 });
 
@@ -89,8 +126,7 @@ test('once the owner revokes the share, the other user no longer finds the passk
   await pkb.share(a, [alice.id], [b.username]);
 
   await inProfile(stack, b, headless, async (bob) => {
-    await bob.rp.login();
-    await bob.rp.expectResult('authenticated:alice');
+    await chooseSharedAlice(stack, bob);
 
     const revoked = await pkb.unshare(a, [alice.id], [b.username]);
     expect(revoked.results.map((r) => r.status)).toEqual(['unshared']);

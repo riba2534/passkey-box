@@ -44,12 +44,31 @@ describe("popup model", () => {
     expect(credentialTitle(list[1]!)).toBe("example.com");
     expect(siteUrl(cred({ origin: "http://localhost:18411", rp_id: "localhost" }))).toBe("http://localhost:18411");
     expect(siteUrl(cred({ origin: "", rp_id: "github.com" }))).toBe("https://github.com");
+    expect(siteUrl(cred({ origin: "https://login.GitHub.com", rp_id: "github.com" }))).toBe("https://login.GitHub.com");
     expect(tabHostname("https://login.example.com/path?q=1")).toBe("login.example.com");
     expect(tabHostname("chrome://extensions")).toBe("");
     expect(tabHostname(undefined)).toBe("");
     expect(tabHostname("not a url")).toBe("");
     expect(serverHost("http://127.0.0.1:18411")).toBe("127.0.0.1:18411");
     expect(serverHost("weird")).toBe("weird");
+  });
+
+  it("打开网站 never leaves the passkey's site, whatever origin another user wrote", () => {
+    for (const origin of [
+      "https://evil.example",
+      "https://github.com.evil.example",
+      "https://evilgithub.com",
+      "https://github.com@evil.example",
+      "http://evil.example/https://github.com",
+      "javascript:alert(1)//github.com",
+      "ftp://github.com",
+      "not a url",
+    ]) {
+      expect([origin, siteUrl(cred({ origin, rp_id: "github.com" }))]).toEqual([origin, "https://github.com"]);
+    }
+    // Subdomain matching follows WebAuthn: not for IP addresses or rp_ids without a dot.
+    expect(siteUrl(cred({ origin: "http://evil.localhost:1", rp_id: "localhost" }))).toBe("https://localhost");
+    expect(siteUrl(cred({ origin: "http://127.0.0.1:8080", rp_id: "0.0.1" }))).toBe("https://0.0.1");
   });
 
   it("formats times in local time", () => {
