@@ -260,44 +260,9 @@ func scanUser(r rowScanner, leading ...any) (User, error) {
 	return u, nil
 }
 
-// CreateUser creates an account. The username must already be valid
-// (see NormalizeUsername); duplicates (case-insensitive) return ErrConflict.
+// CreateUser creates an account as the system; see CreateUserAs.
 func (s *Store) CreateUser(ctx context.Context, username, password string, isAdmin bool, now time.Time) (User, error) {
-	display, key, ok := NormalizeUsername(username)
-	if !ok {
-		return User{}, fmt.Errorf("invalid username %q", username)
-	}
-	hash, err := s.hash(password)
-	if err != nil {
-		return User{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE username_key = ?`, key).Scan(&exists)
-	if err == nil {
-		return User{}, ErrConflict
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return User{}, err
-	}
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO users (username, username_key, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`,
-		display, key, hash, isAdmin, toMillis(now))
-	if err != nil {
-		return User{}, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return User{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-	return s.GetUser(ctx, id)
+	return s.CreateUserAs(ctx, SystemActor, NewUser{Username: username, Password: password, IsAdmin: isAdmin}, now)
 }
 
 // GetUser returns the user with the given ID.
@@ -314,10 +279,36 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users u WHERE u.username_key = ?`, key))
 }
 
-// ListUsers returns all users ordered by ID.
-func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	return queryRows(ctx, s.db, func(r rowScanner) (User, error) { return scanUser(r) },
+// UserFilter selects users for ListUsers. Zero fields do not filter.
+type UserFilter struct {
+	// Query matches a substring of the username or the note, ignoring case.
+	Query    string
+	Admin    *bool
+	Disabled *bool
+}
+
+func (f UserFilter) matches(u User) bool {
+	q := strings.ToLower(f.Query)
+	return (f.Admin == nil || *f.Admin == u.IsAdmin) &&
+		(f.Disabled == nil || *f.Disabled == u.Disabled) &&
+		(q == "" || strings.Contains(strings.ToLower(u.Username), q) || strings.Contains(strings.ToLower(u.Note), q))
+}
+
+// ListUsers returns the users matching f, ordered by ID. The query is matched
+// in Go because SQLite only folds the case of ASCII letters.
+func (s *Store) ListUsers(ctx context.Context, f UserFilter) ([]User, error) {
+	users, err := queryRows(ctx, s.db, func(r rowScanner) (User, error) { return scanUser(r) },
 		`SELECT `+userColumns+` FROM users u ORDER BY u.id`)
+	if err != nil {
+		return nil, err
+	}
+	out := users[:0]
+	for _, u := range users {
+		if f.matches(u) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
 
 // Authenticate checks a username (case-insensitive) and password. It returns
@@ -359,44 +350,27 @@ func (s *Store) CheckPassword(ctx context.Context, id int64, password string) er
 	return nil
 }
 
-// SetPassword replaces the user's password. Existing sessions stay valid.
-func (s *Store) SetPassword(ctx context.Context, id int64, password string) error {
-	hash, err := s.hash(password)
-	if err != nil {
-		return err
-	}
-	return s.execOne(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, id)
-}
-
-// SetAdmin grants or revokes administrator rights.
-func (s *Store) SetAdmin(ctx context.Context, id int64, isAdmin bool) error {
-	return s.execOne(ctx, `UPDATE users SET is_admin = ? WHERE id = ?`, isAdmin, id)
-}
-
-// SetDisabled disables or re-enables the user's sign-in.
+// SetDisabled disables or re-enables the user's sign-in as the system; see
+// UpdateUser.
 func (s *Store) SetDisabled(ctx context.Context, id int64, disabled bool) error {
-	return s.execOne(ctx, `UPDATE users SET disabled = ? WHERE id = ?`, disabled, id)
+	_, err := s.UpdateUser(ctx, SystemActor, id, UserUpdate{Disabled: &disabled}, time.Now())
+	return err
 }
 
-// DeleteUser removes the user together with its sessions and credentials.
-func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	return s.execOne(ctx, `DELETE FROM users WHERE id = ?`, id)
-}
-
-// EnsureAdmin makes sure the named user exists and is an administrator. A new
-// user gets the given password; an existing user keeps its password.
+// EnsureAdmin makes sure the named user exists and is an administrator, acting
+// as the system. A new user gets the given password; an existing user keeps
+// its password.
 func (s *Store) EnsureAdmin(ctx context.Context, username, password string, now time.Time) (created bool, err error) {
-	_, key, ok := NormalizeUsername(username)
-	if !ok {
+	if _, _, ok := NormalizeUsername(username); !ok {
 		return false, fmt.Errorf("invalid admin username %q", username)
 	}
-	var id int64
-	err = s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username_key = ?`, key).Scan(&id)
+	user, err := s.GetUserByUsername(ctx, username)
 	switch {
 	case err == nil:
-		return false, s.SetAdmin(ctx, id, true)
-	case errors.Is(err, sql.ErrNoRows):
-		_, err = s.CreateUser(ctx, username, password, true, now)
+		_, err = s.UpdateUser(ctx, SystemActor, user.ID, UserUpdate{IsAdmin: new(true)}, now)
+		return false, err
+	case errors.Is(err, ErrNotFound):
+		_, err = s.CreateUserAs(ctx, SystemActor, NewUser{Username: username, Password: password, IsAdmin: true}, now)
 		return err == nil, err
 	default:
 		return false, err

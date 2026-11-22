@@ -24,6 +24,13 @@ func TestAdminEndpointsRequireAdmin(t *testing.T) {
 		{"DELETE", fmt.Sprintf("/api/v1/admin/users/%d", alice.ID), nil},
 		{"GET", fmt.Sprintf("/api/v1/admin/users/%d/credentials", alice.ID), nil},
 		{"DELETE", fmt.Sprintf("/api/v1/admin/users/%d/credentials/YQ", alice.ID), nil},
+		{"GET", fmt.Sprintf("/api/v1/admin/users/%d", alice.ID), nil},
+		{"POST", fmt.Sprintf("/api/v1/admin/users/%d/revoke-sessions", alice.ID), nil},
+		{"POST", "/api/v1/admin/users/batch-create", map[string]any{"users": []any{map[string]any{"username": "eve", "password": "pw"}}}},
+		{"POST", "/api/v1/admin/users/batch-update", map[string]any{"items": []any{map[string]any{"user": "alice", "is_admin": true}}}},
+		{"POST", "/api/v1/admin/users/batch-delete", map[string]any{"users": []any{"alice"}}},
+		{"GET", "/api/v1/admin/overview", nil},
+		{"GET", "/api/v1/admin/audit", nil},
 		{"GET", "/api/v1/admin/unknown", nil},
 	}
 	for _, ep := range endpoints {
@@ -135,8 +142,10 @@ func TestAdminUnknownUser(t *testing.T) {
 	admin := e.basic("root", "pw")
 	for _, id := range []string{"999", "abc"} {
 		p := "/api/v1/admin/users/" + id
+		admin.do("GET", p, nil).expectError(http.StatusNotFound, "not_found")
 		admin.do("PATCH", p, map[string]any{"is_admin": true}).expectError(http.StatusNotFound, "not_found")
 		admin.do("DELETE", p, nil).expectError(http.StatusNotFound, "not_found")
+		admin.do("POST", p+"/revoke-sessions", nil).expectError(http.StatusNotFound, "not_found")
 		admin.do("GET", p+"/credentials", nil).expectError(http.StatusNotFound, "not_found")
 		admin.do("DELETE", p+"/credentials/YQ", nil).expectError(http.StatusNotFound, "not_found")
 	}
