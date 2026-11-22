@@ -447,6 +447,7 @@ function siteURL(c) {
 function renderCredentialDetail(c) {
   const shared = isShared(c);
   const url = siteURL(c);
+  const save = shared ? null : (patch) => patchCred(c, patch);
   return h('div', { class: 'detail pk-detail' },
     backButton('我的通行密钥', '#/passkeys'),
     h('div', { class: 'detail-head' },
@@ -456,12 +457,12 @@ function renderCredentialDetail(c) {
         h('div', { class: 'detail-subtitle' },
           h('span', { class: 'badge' }, '通行密钥'), titled(credentialBadges(c)), h('span', { class: 'pk-rp' }, c.rp_id)))),
     credentialNames(c, {
-      save: shared ? null : (patch) => patchCred(c, patch),
+      save,
       after: field('网站', c.rp_id, {
         actions: url ? [h('a', { class: 'icon-btn', href: url, target: '_blank', rel: 'noopener noreferrer', title: '打开网站', 'aria-label': '打开网站' }, icon('external'))] : [],
       }),
     }),
-    credentialFields(c, { save: shared ? null : (fields) => patchCred(c, { fields }) }),
+    credentialFields(c, { save }),
     shared ? sharedWithMe(c) : [labelSection(c), sharesSection(c)],
     h('h3', { class: 'section-title' }, '使用情况'),
     h('div', { class: 'card' },

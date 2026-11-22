@@ -448,6 +448,7 @@ function renderDetail(id) {
         h('button', { type: 'button', class: 'btn btn-sm', onclick: () => showAudit({ credentialId: id }) }, icon('clipboard'), '查看它的操作日志')));
   }
   const shares = c.shared_with || [];
+  const save = (patch) => patchCred(c, patch);
 
   return h('div', { class: 'detail' },
     back,
@@ -461,10 +462,10 @@ function renderDetail(id) {
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => act(shareCreds, [c]) }, icon('share'), '共享'),
       h('button', { type: 'button', class: 'btn btn-sm', onclick: () => showAudit({ credentialId: c.id }) }, icon('clipboard'), '操作日志')),
     credentialNames(c, {
-      save: (patch) => patchCred(c, patch),
+      save,
       before: [field('主人', h('a', { href: '#/users/' + c.owner.id }, c.owner.username)), field('网站', c.rp_id)],
     }),
-    credentialFields(c, { save: (fields) => patchCred(c, { fields }) }),
+    credentialFields(c, { save }),
     h('h3', { class: 'section-title' }, '备注'),
     labelCard(c),
     h('h3', { class: 'section-title' }, `共享 · ${shares.length}`),

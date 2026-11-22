@@ -486,7 +486,9 @@ function say(...parts) {
   });
 }
 
-const UPDATED_NAMES = [['label', '备注'], ['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
+// The names of a passkey a user can edit, and what the console calls them.
+const NAMES = [['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
+const UPDATED_NAMES = [['label', '备注'], ...NAMES];
 
 // updateChanges lists what a credential.update event changed, e.g.
 // "把网站名称改为「GitHub」" or "添加了字段「恢复码」". The detail names fields
@@ -684,26 +686,22 @@ const MAX_FIELDS = 50;
 const MAX_LABEL = 100;
 const MAX_VALUE = 10000;
 
-// FIELD_TYPES names the custom field types, in the order the add menu
-// offers them. The extension uses the same names.
+// FIELD_TYPES describes the custom field types, in the order the add menu
+// offers them: name (the extension uses the same names) and icon, the
+// editor's attributes for the value (input) and, for links, the target of a
+// value or null (href) and the link's other attributes (link).
 const FIELD_TYPES = {
   text: { name: '文本', icon: 'text' },
   password: { name: '密码', icon: 'lock' },
-  totp: { name: '一次性密码', icon: 'timer' },
-  url: { name: '网址', icon: 'link' },
-  email: { name: '邮箱', icon: 'mail' },
-  phone: { name: '电话', icon: 'phone' },
-  date: { name: '日期', icon: 'calendar' },
+  totp: { name: '一次性密码', icon: 'timer', input: { placeholder: '粘贴 base32 密钥或 otpauth:// 链接' } },
+  url: {
+    name: '网址', icon: 'link', input: { inputmode: 'url', placeholder: 'https://' },
+    href: webURL, link: { target: '_blank', rel: 'noopener noreferrer' },
+  },
+  email: { name: '邮箱', icon: 'mail', input: { inputmode: 'email', placeholder: 'name@example.com' }, href: mailHref },
+  phone: { name: '电话', icon: 'phone', input: { inputmode: 'tel', placeholder: '+86 138 0000 0000' }, href: telHref },
+  date: { name: '日期', icon: 'calendar', input: { inputmode: 'numeric', placeholder: 'YYYY-MM-DD，例如 2026-11-23' } },
   multiline: { name: '多行文本', icon: 'lines' },
-};
-
-// Input attributes for the value of each type in the editor.
-const VALUE_INPUTS = {
-  url: { inputmode: 'url', placeholder: 'https://' },
-  email: { inputmode: 'email', placeholder: 'name@example.com' },
-  phone: { inputmode: 'tel', placeholder: '+86 138 0000 0000' },
-  date: { inputmode: 'numeric', placeholder: 'YYYY-MM-DD，例如 2026-11-23' },
-  totp: { placeholder: '粘贴 base32 密钥或 otpauth:// 链接' },
 };
 
 const MASK = '••••••••';
@@ -760,17 +758,23 @@ function sectionHead(title, button) {
   return button ? h('div', { class: 'section-bar' }, t, button) : t;
 }
 
+// badField reads the index of the field the server refused and why from a
+// message such as "fields[3]: invalid TOTP secret", or returns null.
+function badField(err) {
+  const m = /^fields\[(\d+)\]:\s*(.*)$/.exec(err.message || '');
+  return m && { index: Number(m[1]), reason: m[2] };
+}
+
 // saveError explains a failed PATCH in its dialog. The server names a bad
-// field by its index ("fields[3]: invalid TOTP secret"); fields is the
-// list that was sent.
+// field by its index (badField); fields is the list that was sent.
 function saveError(err, fields) {
   if (sessionEnded(err)) return '';
   if (err.code !== 'invalid_request' || !err.message) return errText(err);
-  const m = /^fields\[(\d+)\]:\s*(.*)$/.exec(err.message);
-  const f = m && fields && fields[Number(m[1])];
+  const bad = badField(err);
+  const f = bad && fields && fields[bad.index];
   if (!f) return `${errText(err)}：${err.message}`;
   const name = [...fieldName(f)];
-  return `第 ${Number(m[1]) + 1} 个字段「${name.length > 16 ? name.slice(0, 15).join('') + '…' : name.join('')}」：${m[2]}`;
+  return `第 ${bad.index + 1} 个字段「${name.length > 16 ? name.slice(0, 15).join('') + '…' : name.join('')}」：${bad.reason}`;
 }
 
 // revealButton is an eye button that shows and hides what; toggle gets
@@ -818,8 +822,6 @@ export function credentialNames(c, opts) {
   ];
 }
 
-const NAMES = [['rp_name', '网站名称'], ['user_name', '用户名'], ['user_display_name', '显示名']];
-
 function editNames(c, save) {
   formDialog({
     title: '编辑账号信息',
@@ -859,7 +861,7 @@ function editNames(c, save) {
  *
  * @param {object} c  Credential; servers before 0.7.0 leave out fields.
  * @param {object} [opts]
- * @param {(fields: {id?: string, label: string, type: string, value: string}[]) => Promise<void>} [opts.save]
+ * @param {(patch: {fields: {id?: string, label: string, type: string, value: string}[]}) => Promise<void>} [opts.save]
  *   Sends the PATCH and updates the page's data. Leave it out for viewers
  *   who may not edit.
  * @returns {HTMLElement[]} The section title and its card; nothing for a
@@ -893,7 +895,7 @@ function fieldRow(f) {
     const code = totpCode(p);
     const secret = h('div', { class: 'cf-secret', hidden: true },
       h('code', null, v),
-      iconButton('copy', '复制密钥', () => copyText(v.trim(), '密钥')));
+      copyAction(v.trim(), '密钥'));
     value.append(code);
     more.push(secret);
     actions.push(revealButton('密钥', (shown) => { secret.hidden = !shown; }));
@@ -902,7 +904,6 @@ function fieldRow(f) {
     value.classList.add('muted');
     value.textContent = '—';
   } else {
-    let href = null;
     switch (f.type) {
       case 'password':
         value.textContent = MASK;
@@ -910,18 +911,6 @@ function fieldRow(f) {
           value.textContent = shown ? v : MASK;
           value.classList.toggle('mono', shown);
         }));
-        break;
-      case 'url':
-        href = webURL(v);
-        value.append(href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, v) : v);
-        break;
-      case 'email':
-        href = mailHref(v);
-        value.append(href ? h('a', { href }, v) : v);
-        break;
-      case 'phone':
-        href = telHref(v);
-        value.append(href ? h('a', { href }, v) : v);
         break;
       case 'date': {
         const d = parseDate(v);
@@ -932,8 +921,10 @@ function fieldRow(f) {
         value.classList.add('multiline');
         value.append(v);
         break;
-      default:
-        value.append(v);
+      default: {
+        const href = t.href && t.href(v);
+        value.append(href ? h('a', { href, ...t.link }, v) : v);
+      }
     }
     actions.push(copyAction(v, name));
   }
@@ -993,8 +984,6 @@ function totpCode(p) {
   return el;
 }
 
-let draftKey = 0;
-
 function sameFields(a, b) {
   return a.length === b.length && a.every((f, i) => f.id === b[i].id && f.type === b[i].type
     && f.label === (b[i].label || '') && f.value === (b[i].value || ''));
@@ -1006,12 +995,13 @@ function sameFields(a, b) {
 // decides, and its message shows in the dialog.
 function editFields(c, save) {
   const original = c.fields || [];
-  const draft = original.map((f) => ({ id: f.id, label: f.label || '', type: f.type, value: f.value || '', key: ++draftKey }));
+  const draft = original.map((f) => ({ id: f.id, label: f.label || '', type: f.type, value: f.value || '' }));
   let choosing = !draft.length;
   let list;
   let adder;
 
-  const rowOf = (d) => list.querySelector(`[data-key="${d.key}"]`);
+  // draw keeps the rows in the order of draft.
+  const rowOf = (d) => list.children[draft.indexOf(d)];
 
   const draw = () => {
     list.replaceChildren(...(draft.length
@@ -1049,7 +1039,7 @@ function editFields(c, save) {
   };
 
   const add = (type) => {
-    const d = { label: '', type, value: '', key: ++draftKey };
+    const d = { label: '', type, value: '' };
     draft.push(d);
     choosing = false;
     draw();
@@ -1093,36 +1083,35 @@ function editFields(c, save) {
       checkLabel();
     });
 
+    const hint = (bad, ...content) => {
+      valueHint.classList.toggle('bad', bad);
+      valueHint.replaceChildren(...content);
+    };
+    // previewed is the trimmed TOTP value the hint describes: spaces typed
+    // around it leave the hint and its running code alone.
     let previewed = null;
     const checkValue = () => {
       const n = chars(d.value);
-      valueHint.classList.remove('bad');
       if (n > MAX_VALUE) {
-        valueHint.classList.add('bad');
-        valueHint.textContent = `内容不能超过 ${MAX_VALUE} 个字符，现在是 ${n} 个`;
         previewed = null;
-      } else if (d.type === 'date') {
-        const bad = d.value !== '' && !parseDate(d.value);
-        valueHint.classList.toggle('bad', bad);
-        valueHint.textContent = bad ? '日期格式应为 YYYY-MM-DD，例如 2026-11-23' : '';
-      } else if (d.type === 'totp' && d.value.trim() !== previewed) {
-        previewed = d.value.trim();
-        const p = parseTotp(d.value);
-        if (p.error) {
-          valueHint.classList.toggle('bad', Boolean(previewed));
-          valueHint.replaceChildren(previewed ? p.error : '可以粘贴网站给出的密钥，或者二维码里的 otpauth:// 链接');
-        } else {
-          valueHint.replaceChildren(h('span', { class: 'cf-preview' }, '验证码预览', totpCode(p),
-            h('span', null, `${p.algorithm.replace('-', '')} · ${p.digits} 位 · ${p.period} 秒一换`)));
-        }
-      } else if (d.type !== 'totp') {
-        valueHint.textContent = '';
+        return hint(true, `内容不能超过 ${MAX_VALUE} 个字符，现在是 ${n} 个`);
       }
+      if (d.type === 'date') {
+        return d.value !== '' && !parseDate(d.value) ? hint(true, '日期格式应为 YYYY-MM-DD，例如 2026-11-23') : hint(false);
+      }
+      if (d.type !== 'totp') return hint(false);
+      const text = d.value.trim();
+      if (text === previewed) return;
+      previewed = text;
+      const p = parseTotp(text);
+      if (p.error) return hint(Boolean(text), text ? p.error : '可以粘贴网站给出的密钥，或者二维码里的 otpauth:// 链接');
+      return hint(false, h('span', { class: 'cf-preview' }, '验证码预览', totpCode(p),
+        h('span', null, `${p.algorithm.replace('-', '')} · ${p.digits} 位 · ${p.period} 秒一换`)));
     };
 
     const attrs = {
       class: 'input', 'aria-label': '值', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
-      'data-role': 'value', ...(VALUE_INPUTS[d.type] || { placeholder: '值' }),
+      'data-role': 'value', ...(t.input || { placeholder: '值' }),
     };
     let input;
     let valueBox;
@@ -1150,7 +1139,7 @@ function editFields(c, save) {
     down.disabled = i === draft.length - 1;
     checkLabel();
     checkValue();
-    return h('div', { class: 'cf-edit-row', 'data-key': d.key },
+    return h('div', { class: 'cf-edit-row' },
       h('div', { class: 'cf-edit-head' },
         h('span', { class: 'cf-edit-type' }, icon(t.icon), t.name),
         h('div', { class: 'cf-edit-actions' }, up, down, iconButton('trash', '删除这个字段', () => remove(d), 'danger'))),
@@ -1165,10 +1154,7 @@ function editFields(c, save) {
       type: 'button',
       class: 'btn btn-primary',
       onclick: async () => {
-        const fields = draft.map((d) => (d.id
-          ? { id: d.id, label: d.label, type: d.type, value: d.value }
-          : { label: d.label, type: d.type, value: d.value }));
-        if (sameFields(fields, original)) {
+        if (sameFields(draft, original)) {
           close();
           return;
         }
@@ -1176,15 +1162,15 @@ function editFields(c, save) {
         error.textContent = '';
         for (const row of list.querySelectorAll('.cf-edit-row.invalid')) row.classList.remove('invalid');
         try {
-          await save(fields);
+          await save({ fields: draft });
         } catch (err) {
           submit.disabled = false;
           error.textContent = saveError(err, draft);
-          const m = /^fields\[(\d+)\]/.exec(err.message || '');
-          const bad = m && draft[Number(m[1])];
-          if (bad) {
-            rowOf(bad).classList.add('invalid');
-            rowOf(bad).scrollIntoView({ block: 'nearest' });
+          const bad = badField(err);
+          const row = bad && draft[bad.index] && rowOf(draft[bad.index]);
+          if (row) {
+            row.classList.add('invalid');
+            row.scrollIntoView({ block: 'nearest' });
           }
           return;
         }
