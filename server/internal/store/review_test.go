@@ -2,8 +2,10 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -93,12 +95,101 @@ func TestLogicalBackupRestoreIsNotMigratedAgain(t *testing.T) {
 	}
 }
 
+// A schema 1 database restored from a logical backup is migrated once, like
+// the version 1 database it was.
+func TestLogicalBackupOfSchema1IsMigrated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pkb.db")
+	writeV1Database(t, path)
+	db := openRaw(t, path)
+	mustExec(t, db, `PRAGMA user_version = 0`)
+	before := dumpRows(t, db, v1Columns)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.Migration.From != 1 || s.Migration.To != 2 || s.Migration.Snapshot == "" || userVersion(t, s.db) != 2 {
+		t.Fatalf("migration = %+v", s.Migration)
+	}
+	if got := dumpRows(t, s.db, v1Columns); !reflect.DeepEqual(got, before) {
+		t.Fatal("rows changed by the migration")
+	}
+	expectSchema2Defaults(t, s.db, 5)
+	if got := snapshots(t, dir); len(got) != 1 {
+		t.Fatalf("snapshots = %v", got)
+	}
+}
+
+// 0.6.0 sets version 1 on a schema 2 database restored from a logical backup,
+// which already has the schema 2 columns.
+func TestSchema2AtVersion1IsNotMigratedAgain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pkb.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.db, `PRAGMA user_version = 1`)
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open = %v", err)
+	}
+	defer s.Close()
+	if v := userVersion(t, s.db); v != 2 || s.Migration.From != 2 || s.Migration.Snapshot != "" {
+		t.Fatalf("user_version = %d, migration %+v", v, s.Migration)
+	}
+	if got := snapshots(t, dir); len(got) != 0 {
+		t.Fatalf("snapshots = %v", got)
+	}
+}
+
 func TestPartialSchemaV1IsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pkb.db")
 	writeV0Database(t, path, nil)
 	mustExec(t, openRaw(t, path), `CREATE TABLE audit_log (id INTEGER PRIMARY KEY)`)
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "part of schema 1") {
 		t.Fatalf("Open = %v", err)
+	}
+}
+
+func TestPartialSchemaV2IsRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		write   func(t *testing.T, path string)
+		version int
+		stmts   []string
+		want    string
+	}{
+		"one column at version 1": {func(t *testing.T, path string) { writeV1Database(t, path) }, 1,
+			[]string{`ALTER TABLE credentials ADD COLUMN edited TEXT NOT NULL DEFAULT ''`}, "part of schema 2"},
+		"one column at version 0": {func(t *testing.T, path string) { writeV1Database(t, path) }, 0,
+			[]string{`ALTER TABLE credentials ADD COLUMN fields TEXT NOT NULL DEFAULT '[]'`}, "part of schema 2"},
+		"without schema 1": {func(t *testing.T, path string) { writeV0Database(t, path, nil) }, 0,
+			[]string{`ALTER TABLE credentials ADD COLUMN fields TEXT NOT NULL DEFAULT '[]'`,
+				`ALTER TABLE credentials ADD COLUMN edited TEXT NOT NULL DEFAULT ''`}, "schema 2 without schema 1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "pkb.db")
+			tc.write(t, path)
+			db := openRaw(t, path)
+			for _, stmt := range tc.stmts {
+				mustExec(t, db, stmt)
+			}
+			mustExec(t, db, fmt.Sprintf(`PRAGMA user_version = %d`, tc.version))
+			if _, err := Open(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Open = %v, want %q", err, tc.want)
+			}
+			if got := snapshots(t, dir); len(got) != 0 {
+				t.Fatalf("snapshots = %v", got)
+			}
+			if v := userVersion(t, db); v != tc.version {
+				t.Fatalf("user_version = %d", v)
+			}
+		})
 	}
 }
 

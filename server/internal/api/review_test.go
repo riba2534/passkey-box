@@ -170,3 +170,17 @@ func TestSessionsRefuseCrossSiteWrites(t *testing.T) {
 	}
 	res.Body.Close()
 }
+
+// The largest valid fields list, 50 fields of 10000 CJK characters (three
+// bytes each in UTF-8), must fit in a request body.
+func TestLargestFieldsListFitsInARequest(t *testing.T) {
+	e := newEnv(t)
+	e.createUser("alice", "pw", false)
+	c := e.basic("alice", "pw")
+	c.do("POST", "/api/v1/credentials", newCred("YQ", "a.com", "YQ")).expect(http.StatusCreated)
+	fields := make([]map[string]string, 50)
+	for i := range fields {
+		fields[i] = map[string]string{"label": "字段", "type": "multiline", "value": strings.Repeat("密", 10000)}
+	}
+	c.do("PATCH", "/api/v1/credentials/YQ", map[string]any{"fields": fields}).expect(http.StatusOK)
+}

@@ -19,11 +19,12 @@ import (
 // Migrations only add tables, columns and indexes and never rewrite or delete
 // existing rows, so an older build can still open a migrated database (deploy
 // rollbacks rely on this).
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // migrations[i] upgrades the schema from version i to i+1.
 var migrations = []func(ctx context.Context, tx *sql.Tx) error{
 	migrateV1,
+	migrateV2,
 }
 
 // Migration describes what Open did to the schema.
@@ -53,19 +54,20 @@ func (s *Store) migrate(ctx context.Context, path string, existed bool, now time
 		return m, nil
 	}
 	// A logical backup (sqlite3 .dump) does not keep user_version: a
-	// database restored from one has the schema 1 objects at version 0.
-	if version == 0 {
-		shaped, err := hasSchemaV1(ctx, s.db)
-		if err != nil {
+	// database restored from one has the objects of its schema at version 0,
+	// or at the version an older build that opened it first set (0.6.0 sets
+	// 1 on a restored schema 2 database).
+	shaped, err := schemaShape(ctx, s.db)
+	if err != nil {
+		return m, err
+	}
+	if shaped > version {
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, shaped)); err != nil {
 			return m, err
 		}
-		if shaped {
-			if _, err := s.db.ExecContext(ctx, `PRAGMA user_version = 1`); err != nil {
-				return m, err
-			}
-			log.Printf("database has the schema 1 tables at version 0 (restored from a logical backup?); set its version to 1")
-			version, m.From = 1, 1
-		}
+		log.Printf("database has the schema %d objects at version %d (restored from a logical backup?); set its version to %d",
+			shaped, version, shaped)
+		version, m.From = shaped, shaped
 	}
 	if version == SchemaVersion {
 		m.To = version
@@ -121,8 +123,32 @@ func snapshotPath(path string, version int, now time.Time) string {
 
 func sqlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
+// schemaShape returns the latest schema version whose objects all exist, 0
+// for none. Some but not all of the objects of a version, or the objects of a
+// version without those of an earlier one, is an error: no migration leaves a
+// database like that.
+func schemaShape(ctx context.Context, q queryer) (int, error) {
+	v1, err := hasSchemaV1(ctx, q)
+	if err != nil {
+		return 0, err
+	}
+	v2, err := hasSchemaV2(ctx, q)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case v2 && !v1:
+		return 0, fmt.Errorf("database has schema 2 without schema 1; restore it from a complete backup")
+	case v2:
+		return 2, nil
+	case v1:
+		return 1, nil
+	}
+	return 0, nil
+}
+
 // hasSchemaV1 reports whether the schema 1 objects exist. Some but not all of
-// them is an error: no migration leaves a database like that.
+// them is an error.
 func hasSchemaV1(ctx context.Context, q queryer) (bool, error) {
 	var objects, columns int
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
@@ -140,6 +166,23 @@ func hasSchemaV1(ctx context.Context, q queryer) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("database has only part of schema 1; restore it from a complete backup")
+}
+
+// hasSchemaV2 reports whether the schema 2 columns exist. One without the
+// other is an error.
+func hasSchemaV2(ctx context.Context, q queryer) (bool, error) {
+	var columns int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('credentials')
+		WHERE name IN ('fields', 'edited')`).Scan(&columns); err != nil {
+		return false, err
+	}
+	switch columns {
+	case 2:
+		return true, nil
+	case 0:
+		return false, nil
+	}
+	return false, fmt.Errorf("database has only part of schema 2; restore it from a complete backup")
 }
 
 // checkUniqueCredentialIDs reports a credential ID stored for more than one
@@ -209,6 +252,20 @@ func migrateV1(ctx context.Context, tx *sql.Tx) error {
 		`CREATE INDEX audit_log_subject ON audit_log(subject_id, id)`,
 		`CREATE INDEX audit_log_target ON audit_log(target_id, id)`,
 		`CREATE INDEX audit_log_credential ON audit_log(credential_id, id)`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateV2 adds the custom fields of credentials (a JSON array) and the
+// record of which of their names the user edited (see Credential.edited).
+func migrateV2(ctx context.Context, tx *sql.Tx) error {
+	for _, stmt := range []string{
+		`ALTER TABLE credentials ADD COLUMN fields TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE credentials ADD COLUMN edited TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err

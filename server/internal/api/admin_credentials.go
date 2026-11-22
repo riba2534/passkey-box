@@ -107,11 +107,11 @@ func (s *Server) handleAdminGetCredential(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAdminUpdateCredential(w http.ResponseWriter, r *http.Request, c *caller) {
-	label, ok := readLabel(w, r)
+	u, ok := readCredentialUpdate(w, r)
 	if !ok {
 		return
 	}
-	cred, err := s.opts.Store.AdminSetCredentialLabel(r.Context(), c.actor(), r.PathValue("id"), label, s.opts.Now())
+	cred, err := s.opts.Store.AdminUpdateCredential(r.Context(), c.actor(), r.PathValue("id"), u, s.opts.Now())
 	if err != nil {
 		s.writeStoreError(w, err, credentialNotFound)
 		return
