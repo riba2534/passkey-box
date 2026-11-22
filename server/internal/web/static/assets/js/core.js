@@ -394,9 +394,10 @@ export async function confirmDelete(dialog, path, errOverrides) {
 }
 
 // formDialog shows a form; onSubmit(values) returns an error message or "".
-// A field is { name, label, type, value, placeholder, autocomplete, hint }:
-// type is an input type, 'checkbox' (value is a boolean) or 'textarea';
-// hint is a note under the input.
+// A field is { name, label, type, value, placeholder, autocomplete, hint, options }:
+// type is an input type, 'checkbox' (value is a boolean), 'textarea' or
+// 'select' (options is [[value, text], ...]; the submitted value is the
+// option's value string); hint is a note under the input.
 export function formDialog({ title, intro, fields, submitText, onSubmit }) {
   openModal(title, (close) => {
     const inputs = {};
@@ -428,9 +429,15 @@ export function formDialog({ title, intro, fields, submitText, onSubmit }) {
           inputs[f.name] = h('input', { type: 'checkbox', id, checked: f.value });
           return h('div', { class: 'form-row' }, h('label', { class: 'checkbox', for: id }, inputs[f.name], f.label), hint);
         }
-        inputs[f.name] = f.type === 'textarea'
-          ? h('textarea', { class: 'input textarea', id, rows: 6, spellcheck: 'false', placeholder: f.placeholder || '', value: f.value })
-          : h('input', { class: 'input', id, type: f.type || 'text', autocomplete: f.autocomplete || 'off', placeholder: f.placeholder || '', value: f.value });
+        if (f.type === 'select') {
+          inputs[f.name] = h('select', { class: 'input input-select', id },
+            f.options.map(([value, text]) => h('option', { value }, text)));
+          if (f.value != null) inputs[f.name].value = f.value;
+        } else if (f.type === 'textarea') {
+          inputs[f.name] = h('textarea', { class: 'input textarea', id, rows: 6, spellcheck: 'false', placeholder: f.placeholder || '', value: f.value });
+        } else {
+          inputs[f.name] = h('input', { class: 'input', id, type: f.type || 'text', autocomplete: f.autocomplete || 'off', placeholder: f.placeholder || '', value: f.value });
+        }
         return formRow(f.label, inputs[f.name], hint);
       }),
       error),
