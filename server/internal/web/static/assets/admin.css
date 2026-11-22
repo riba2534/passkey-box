@@ -2,12 +2,17 @@
 
 /* ---------- Lists ---------- */
 
+.list-title-actions { display: flex; gap: 6px; flex: none; }
 .select-all { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .list-header .selection-bar { margin-top: 10px; }
 .admin-page .list-item .select-box { margin-right: -2px; }
+.admin-page .list-item.is-disabled .avatar { filter: grayscale(1); opacity: .5; }
+.admin-page .list-item.is-disabled .item-title .text { color: var(--text-2); }
 .admin-page .item-title .badge.gray { min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; line-height: 18px; }
 .admin-page .item-title a.text { color: inherit; }
 .load-more { display: flex; justify-content: center; padding: 10px 0 4px; color: var(--text-3); font-size: 12px; }
+
+.badge.red { background: var(--danger-soft); color: var(--danger); }
 
 /* ---------- Filters ---------- */
 
@@ -37,15 +42,30 @@ button.chip:hover { background: var(--bg-hover); }
 /* ---------- Detail ---------- */
 
 .admin-actions { margin: -8px 0 20px; }
+.self-hint { margin: -12px 0 20px 2px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.section-link { margin: 0 2px 8px 0; padding: 0; border: 0; background: none; color: var(--primary); font-size: 12px; font-weight: 500; }
+.section-link:hover { text-decoration: underline; }
+.row-actions { display: flex; gap: 2px; flex: none; }
 .card-empty { padding: 14px 16px; color: var(--text-3); font-size: 13px; }
 .card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; border-top: 1px solid var(--border); }
 
 /* ---------- Dialogs ---------- */
 
 .modal-foot.wrap { flex-wrap: wrap; }
+.textarea.mono { font-family: var(--mono); font-size: 13px; }
 .share-warning { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; color: #8A5A00; }
 .share-warning .icon { width: 16px; height: 16px; margin-top: 2px; }
 .keep-access { margin-top: 10px; }
+.modal-body .notice { margin-bottom: 12px; }
+.pw-wrap { max-height: 320px; overflow: auto; margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.pw-table { width: 100%; border-collapse: collapse; table-layout: fixed; color: var(--text); font-size: 13px; }
+.pw-table th { position: sticky; top: 0; padding: 6px 12px; background: var(--bg); color: var(--text-2); font-size: 12px; font-weight: 600; text-align: left; }
+.pw-table th:last-child { width: 44px; }
+.pw-table td { padding: 4px 12px; border-top: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-table td:last-child { padding: 2px 6px; }
+.pw-pass { font-family: var(--mono); }
+.pw-pass.muted { font-family: var(--font); color: var(--text-3); }
 
 /* ---------- Audit events ---------- */
 
