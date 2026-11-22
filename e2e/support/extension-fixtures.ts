@@ -41,6 +41,11 @@ export class PkbExtension {
   async unconfigure(): Promise<void> {
     await this.worker.evaluate(() => chrome.storage.local.remove(['pkb_config', 'pkb_settings']));
   }
+
+  /** The toolbar popup, opened as a tab. */
+  get popupUrl(): string {
+    return `chrome-extension://${new URL(this.worker.url()).host}/popup.html`;
+  }
 }
 
 /** Selectors from CONTRACT §4.6. Playwright CSS locators pierce the open shadow root. */
