@@ -17,18 +17,23 @@ export interface TotpParams {
 const HASH: Record<TotpAlgorithm, string> = { SHA1: "SHA-1", SHA256: "SHA-256", SHA512: "SHA-512" };
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
+// The server's rules know only ASCII whitespace; \s and String.prototype.trim() also take U+0085, U+FEFF and more.
+const SPACE_OR_DASH = /[ \t\n\r\f\v-]/g;
+const EDGE_SPACE = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+
 /**
- * RFC 4648 base32, case-insensitive, ignoring whitespace and "-", optionally "="-padded (CONTRACT §2).
+ * RFC 4648 base32, case-insensitive, ignoring ASCII whitespace and "-", optionally "="-padded (CONTRACT §2).
  * Null for other characters, "=" before the end, or a length no encoder produces, which includes no bytes at all.
  */
 export function decodeBase32(text: string): Bytes | null {
-  const s = text.replace(/[\s-]/g, "").toUpperCase().replace(/=+$/, "");
-  if (!/^[A-Z2-7]+$/.test(s) || [1, 3, 6].includes(s.length % 8)) return null;
+  const s = text.replace(SPACE_OR_DASH, "").replace(/=+$/, "");
+  // Checked before upper-casing, which turns "ß" into "SS".
+  if (!/^[A-Za-z2-7]+$/.test(s) || [1, 3, 6].includes(s.length % 8)) return null;
   const out = new Uint8Array(Math.floor((s.length * 5) / 8));
   let buffer = 0;
   let bits = 0;
   let n = 0;
-  for (const ch of s) {
+  for (const ch of s.toUpperCase()) {
     buffer = ((buffer << 5) | BASE32.indexOf(ch)) & 0xfff;
     bits += 5;
     if (bits >= 8) {
@@ -41,7 +46,7 @@ export function decodeBase32(text: string): Bytes | null {
 
 /** A field value as TOTP parameters (CONTRACT §2), or null when it is neither form. */
 export function parseTotp(value: string): TotpParams | null {
-  const text = value.trim();
+  const text = value.replace(EDGE_SPACE, "");
   if (!/^otpauth:/i.test(text)) {
     const secret = decodeBase32(text);
     return secret && { secret, algorithm: "SHA1", digits: 6, period: 30 };
@@ -61,15 +66,12 @@ export function parseTotp(value: string): TotpParams | null {
   }
   const secret = decodeBase32(params.get("secret") ?? "");
   const algorithm = (params.get("algorithm") || "SHA1").toUpperCase();
-  const digits = integer(params.get("digits") || "6", 6, 8);
-  const period = integer(params.get("period") || "30", 1, 300);
-  if (!secret || !Object.hasOwn(HASH, algorithm) || digits === null || period === null) return null;
-  return { secret, algorithm: algorithm as TotpAlgorithm, digits, period };
-}
-
-function integer(text: string, min: number, max: number): number | null {
-  const n = Number(text);
-  return /^\d+$/.test(text) && n >= min && n <= max ? n : null;
+  const digits = params.get("digits") || "6";
+  // Only digits, read as a whole number: "030" is 30.
+  const period = params.get("period") || "30";
+  if (!secret || !Object.hasOwn(HASH, algorithm) || !["6", "7", "8"].includes(digits) || !/^\d+$/.test(period)) return null;
+  if (Number(period) < 1 || Number(period) > 300) return null;
+  return { secret, algorithm: algorithm as TotpAlgorithm, digits: Number(digits), period: Number(period) };
 }
 
 /** RFC 4226: HMAC of the 8-byte big-endian counter, dynamically truncated to `digits` decimal digits. */
